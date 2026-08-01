@@ -184,6 +184,40 @@ The public surface of each package, taken from `__all__`.
 - **`stable_hash`** *(function)* — Deterministic hash of any JSON-serialisable structure.
 - **`write_report`** *(function)* — Write the full evaluation report next to the model artifact.
 
+## `pmbtc.trading`
+
+- **`CostModel`** *(class)* — Prices an entry against a quote. Pure: no clock, no network, no state.
+- **`Decision`** *(class)* — What to do about one window, and why.
+- **`DecisionEngine`** *(class)* — Applies the abstention gates to one window.
+- **`Fill`** *(class)* — The realised economics of one entry.
+- **`PositionSizer`** *(class)* — Turns a decision into an amount of money. Pure and deterministic.
+- **`Quote`** *(class)* — A two-sided quote for the UP token, with the depth standing behind it.
+- **`RiskLedger`** *(class)* — Tracks exposure and losses, and refuses trades that breach a limit.
+- **`RiskState`** *(class)* — Everything the limits are computed from.
+- **`Stake`** *(class)* — How much to stake, and what decided it.
+
+## `pmbtc.backtest`
+
+- **`BacktestEngine`** *(class)* — Runs one strategy over one set of settled windows.
+- **`BacktestMetrics`** *(class)* — Everything the deployment gate and the operator need to see.
+- **`BacktestReport`** *(class)* — Metrics, the gate's verdict, and the statistics behind it.
+- **`BacktestResult`** *(class)* — Every window the engine looked at, in order, plus how it ended.
+- **`ColumnMap`** *(class)* — Which dataset columns carry the book. Named once, in one place.
+- **`ConstantModel`** *(class)* — Always the same probability. Used to exercise the gates in tests.
+- **`EstimatorModel`** *(class)* — Wraps a fitted estimator, pinning the column order it was trained on.
+- **`FillModel`** *(class)* — Prices and sizes an entry against the book that was recorded.
+- **`FillOutcome`** *(class)* — A fill, or a named reason there wasn't one.
+- **`GateCheck`** *(class)* — GateCheck(name: 'str', passed: 'bool', detail: 'str')
+- **`MarketProbabilityModel`** *(class)* — The book's own forecast. The null strategy, and the bar to beat.
+- **`ProbabilityModel`** *(object)* — 
+- **`WalkForwardReport`** *(class)* — One report per lookback, plus the combined verdict.
+- **`WindowResult`** *(class)* — One evaluated window — traded or not.
+- **`compute_metrics`** *(function)* — Summarise a completed run. Pure function of the run's windows.
+- **`evaluate_backtest`** *(function)* — Score a completed run against ``config.backtest``.
+- **`quote_from_row`** *(function)* — Reconstruct the book as it stood at the snapshot instant.
+- **`run_walk_forward`** *(function)* — Run and gate the backtest over every configured lookback.
+- **`slice_recent`** *(function)* — Rows settling within ``days`` of the last settlement in the data.
+
 ## `pmbtc.ops`
 
 - **`Alert`** *(class)* — Alert(kind: 'AlertKind', severity: 'Severity', message: 'str', detail: 'dict[str, Any]', raised_at_ms: 'int')

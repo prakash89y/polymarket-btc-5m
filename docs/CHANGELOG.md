@@ -14,6 +14,98 @@ one that does not.
 
 ---
 
+## [0.9.0] — 2026-08-01 — Module 8: the trading layer and the backtest
+
+The first module that measures money. Everything before it scores *forecasts* —
+Brier, log loss, calibration — and on this instrument that is not the same
+question. The spread is 1-3 cents on a contract worth about 50, so a model can
+beat the market's own forecast and still lose on every trade it places. Until
+now the system had no way to detect that.
+
+### Added
+
+**`pmbtc.trading` — the shared path from a probability to a position.**
+Deliberately a separate package from the simulator, because the same four
+questions have to be answered identically in backtest, in paper, and with real
+money. `CostConfig`'s own docstring already said "one cost model, used
+identically by backtest, paper, and live"; putting it inside the simulator would
+have guaranteed a second, subtly different implementation in Module 10.
+
+- `costs.py` — entry prices, fees, round-trip cost, binary payoff. Buying UP
+  lifts the UP ask; buying DOWN pays `1 - bid_up`, which no-arbitrage between
+  the paired tokens makes the DOWN ask. Both directions cross the spread, which
+  is the conservative reading and the correct one.
+- `decision.py` — the abstention gates, ordered data-validity → market
+  conditions → model opinion, so a stale book reports `stale_data` rather than a
+  misleading `edge_too_small` computed from prices that were never real. Every
+  refusal carries a `SkipReason`; none of the gates can *start* a trade.
+- `sizing.py` — fractional Kelly with the caps that matter more than Kelly. At
+  `p=0.95, c=0.50` full Kelly asks for 90% of bankroll on one coin flip;
+  `max_risk_per_trade` is what stands between that belief and the account.
+- `risk.py` — daily/weekly loss limits, consecutive-loss stand-downs, exposure
+  caps, kill switch. Never reads the clock: `now_ms` comes from the caller, so a
+  backtest and a live run produce identical state transitions.
+
+**`pmbtc.backtest` — the simulator and the deployment gate.**
+
+- `engine.py` — chronological replay, one decision per window. The label is used
+  for exactly one thing: settling a position that was already opened.
+- `fills.py` — `touch` by default; fills are capped at the depth actually
+  resting, and under `pessimistic_fill` an *unknown* depth is treated as no
+  depth. `mid` and `aggressive` exist as sensitivity analyses — the gap between
+  `touch` and `mid` is the honest measure of how much of a strategy is really a
+  bet on getting maker fills.
+- `metrics.py` — money and forecast quality reported side by side, because when
+  they disagree the disagreement is the finding. Break-even is the average price
+  paid, not 0.5.
+- `report.py` — the deployment gate, modelled on `models/promotion.py`: every
+  check must pass, no force flag.
+- `walkforward.py` — every lookback in `backtest.windows_days` gated separately,
+  so a strategy whose entire profit came from one good fortnight cannot hide
+  inside an average.
+- `adapters.py` — `MarketProbabilityModel` is the null control: it forecasts
+  what the book forecasts, so it must place zero trades. If it ever trades, the
+  edge calculation is wrong.
+
+- `pmbtc backtest [--model market|logistic|gradient_boosting] [--horizon N]
+  [--fill touch|mid|aggressive] [--walk-forward]`. The train/test split is on a
+  **market** boundary, so a market whose T-240 row fitted the model never has
+  its T-60 row evaluated by it.
+- `scripts/validate_module8.py` — 21 checks, each one a property that would let
+  the system report a profit it did not earn. Wired into CI alongside a
+  deployment-gate check that mirrors the readiness-gate check: a gate that
+  approves a strategy on ten lucky trades is not a gate.
+
+### Fixed
+Two defects found by the tests written for this module, both in new code:
+- A depth-capped fill recorded the *capped* stake as the requested amount, so
+  `Fill.partial` was always false — partial fills could never have been detected.
+- `RiskLedger` attributed P&L to an uninitialised day, so the next period
+  rollover cleared a halt that had only just fired. A daily loss limit would have
+  lasted no time at all. `register_close` now rolls the period first.
+
+### Notes
+The six abstention thresholds, five sizing caps, and seven risk limits this
+module makes live were already written in `config.yaml` — and, as the gap
+analysis for this release found, had **zero code consumers**: `sizing`,
+`backtest` and `paper` were referenced nowhere in `src/`, and `costs`,
+`execution` and `risk` only by their own validators. `constants.py` had likewise
+defined `SkipReason`, `TradeStatus` and `OrderType` since Module 1 with nothing
+using them. Module 8 is where that vocabulary starts running.
+
+No schema moved: feature, dataset, settlement and model schemas are all
+unchanged, and this module reads the dataset through the existing `build_rows`
+rather than introducing a second loader. Readiness gates and training discipline
+are untouched — the backtest deliberately does **not** require a trained model,
+which is what makes it usable now, while the dataset is still hours old.
+
+Measured on the 59 labelled markets collected so far, the null control places 0
+trades and the gate returns INCONCLUSIVE on every strategy tried. That is the
+correct answer, and it will stay the correct answer until roughly 200 trades'
+worth of history exists.
+
+---
+
 ## [0.8.3] — 2026-08-01 — Dependency audit on a clean runner
 
 ### Fixed

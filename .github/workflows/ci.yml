@@ -143,6 +143,41 @@ jobs:
           print("readiness gate correctly blocks:", len(report.failures), "unmet thresholds")
           PY
 
+      - name: Backtest cannot flatter itself
+        run: python scripts/validate_module8.py
+
+      - name: Trading layer and simulator
+        run: pytest -q tests/test_trading.py tests/test_backtest.py
+
+      - name: Deployment gate refuses a small sample
+        # The mirror of the readiness gate above: a gate that approves a
+        # strategy on ten lucky trades is not a gate.
+        run: |
+          python - <<'PY'
+          from pmbtc.backtest import BacktestEngine, ConstantModel, evaluate_backtest
+          from pmbtc.config import Config
+
+          config = Config()
+          rows = [
+              {
+                  "condition_id": f"m{i}", "horizon_seconds": h,
+                  "settlement_time_ms": 1_785_600_000_000 + i * 300_000,
+                  "label": 1, "official_outcome": "up",
+                  "f_ob_best_bid": 0.49, "f_ob_best_ask": 0.51, "f_ob_mid": 0.50,
+                  "f_lq_depth_bid_usdc": 500.0, "f_lq_depth_ask_usdc": 500.0,
+                  "lat_ob_best_bid": 200, "lat_ob_best_ask": 200,
+              }
+              for i in range(10)
+              for h in (240, 180, 120, 60, 30)
+          ]
+          result = BacktestEngine(config).run(rows, ConstantModel(0.95))
+          report = evaluate_backtest(config, result)
+          assert result.ending_bankroll_usdc > result.starting_bankroll_usdc, "expected a profit"
+          assert not report.conclusive, "a 10-trade run was reported as conclusive"
+          assert not report.approved, "deployment gate approved a 10-trade run"
+          print("deployment gate correctly refuses:", len(report.failures), "failed checks")
+          PY
+
   # ---------------------------------------------------------------------- #
   security:
     name: Secrets and dependency scan
