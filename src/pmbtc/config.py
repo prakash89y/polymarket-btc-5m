@@ -728,6 +728,39 @@ class PredictionConfig(_Base):
     #: Defaults to 0.0 — no shrinkage — so enabling it is an explicit choice.
     confidence_shrinkage: float = Field(default=0.0, ge=0, le=1)
 
+    # ---------------------------------------------------------------- #
+    # Module 8.5 — market edge validation. Ceilings, not floors.
+    # ---------------------------------------------------------------- #
+    #: Maximum |logit(model) - logit(market)| that will be acted on.
+    #:
+    #: Measured in log-odds rather than probability points deliberately.
+    #: Disagreeing with a 0.50 book by 0.25 is an ordinary claim; disagreeing
+    #: with a 0.97 book by 0.25 is an extraordinary one, and probability-space
+    #: distance cannot tell them apart. 1.5 logits lets a 0.50 market be called
+    #: at 0.82, and a 0.97 market no lower than about 0.88.
+    max_disagreement_logits: float = Field(default=1.5, gt=0, le=10)
+    #: Probabilities outside ``[p, 1-p]`` are treated as broken rather than
+    #: confident. No honest forecast of a 5-minute BTC coin flip reaches 0.999,
+    #: and the logistic baseline emitted exactly that on real data.
+    min_plausible_prob: float = Field(default=0.02, gt=0, lt=0.5)
+    #: Robust (median/MAD) z-score above which a disagreement is treated as an
+    #: outlier against this model's own recent behaviour. Catches a model that
+    #: breaks *after* deployment, which a fixed bound cannot.
+    max_disagreement_z: float = Field(default=4.0, gt=0)
+    #: Observations retained by the anomaly monitor, and the minimum needed
+    #: before it is allowed to reject anything.
+    disagreement_history: int = Field(default=200, ge=10)
+    min_disagreement_history: int = Field(default=30, ge=5)
+    #: Weight on the model when blending toward the market prior, in [0, 1].
+    #: 1.0 trusts the model completely; 0.0 defers entirely to the book.
+    #:
+    #: The market's own price is the right shrinkage target here — not 0.5 —
+    #: because the collected data shows the book is well calibrated in every
+    #: probability bucket. Defaults to 1.0 so that calibration-adjusted EV is
+    #: reported before it is enforced: the value that is justified is an
+    #: empirical question, and ``pmbtc edge-scan`` is what answers it.
+    model_trust: float = Field(default=1.0, ge=0, le=1)
+
 
 class CostConfig(_Base):
     """One cost model, used identically by backtest, paper, and live.

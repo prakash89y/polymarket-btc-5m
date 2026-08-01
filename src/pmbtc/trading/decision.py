@@ -29,6 +29,7 @@ from pmbtc.config import Config
 from pmbtc.constants import Outcome, SkipReason
 from pmbtc.logging_setup import get_logger
 from pmbtc.trading.costs import CostModel, Quote
+from pmbtc.trading.validation import MarketEdgeValidator
 
 log = get_logger("pmbtc.trading.decision")
 
@@ -58,6 +59,12 @@ class Decision:
     #: can show how much of an abstention was the model and how much was us
     #: distrusting it.
     raw_prob_up: float = 0.5
+    #: |logit(model) - logit(market)|. The quantity Module 8.5 bounds, and the
+    #: input to the disagreement distribution report.
+    disagreement_logits: float = 0.0
+    #: Probability after shrinkage toward the market prior. Equal to
+    #: ``model_prob_up`` when ``prediction.model_trust`` is 1.0.
+    adjusted_prob_up: float = 0.5
 
     @property
     def expected_roi(self) -> float:
@@ -72,6 +79,8 @@ class Decision:
             "detail": self.detail,
             "model_prob_up": round(self.model_prob_up, 6),
             "raw_prob_up": round(self.raw_prob_up, 6),
+            "adjusted_prob_up": round(self.adjusted_prob_up, 6),
+            "disagreement_logits": round(self.disagreement_logits, 6),
             "market_prob_up": round(self.market_prob_up, 6),
             "entry_price": round(self.entry_price, 6),
             "edge": round(self.edge, 6),
@@ -112,9 +121,18 @@ def shrink_toward_fair(probability: float, shrinkage: float) -> float:
 class DecisionEngine:
     """Applies the abstention gates to one window."""
 
-    def __init__(self, config: Config, costs: CostModel | None = None) -> None:
+    def __init__(
+        self,
+        config: Config,
+        costs: CostModel | None = None,
+        validator: MarketEdgeValidator | None = None,
+    ) -> None:
         self.config = config
         self.costs = costs or CostModel(config.costs)
+        # Stateful only in its anomaly monitor, which is fed solely by the
+        # claims passed through it — so a replay of the same rows in the
+        # same order yields the same verdicts.
+        self.validator = validator or MarketEdgeValidator.from_config(config)
 
     def decide(
         self,
@@ -233,9 +251,29 @@ class DecisionEngine:
                 **base,
             )
 
+        # --- 4b. Market edge validation (Module 8.5) ------------------- #
+        # The ceilings. Everything above and below this block is a floor, and
+        # floors cannot catch a broken model: its apparent edge grows with its
+        # error, so it trades harder the worse it gets. Run before the
+        # confidence gate so a pathological claim is named as pathological
+        # rather than passing a bar it clears precisely because it is wrong.
+        validation = self.validator.validate(model_prob_up, market_prob)
+        base["disagreement_logits"] = validation.disagreement
+        base["adjusted_prob_up"] = validation.adjusted_prob
+        if not validation.accepted:
+            return _skip(
+                validation.skip_reason or SkipReason.ANOMALOUS_EDGE,
+                validation.detail,
+                **base,
+            )
+
         # --- 5. Does the model have an opinion worth acting on? -------- #
-        outcome = Outcome.UP if model_prob_up >= 0.5 else Outcome.DOWN
-        confidence = model_prob_up if outcome is Outcome.UP else 1.0 - model_prob_up
+        # From here the *adjusted* probability is what gets acted on: with
+        # model_trust below 1 it has been shrunk toward the book, which is the
+        # right prior for a market the data shows to be well calibrated.
+        acted_prob = validation.adjusted_prob
+        outcome = Outcome.UP if acted_prob >= 0.5 else Outcome.DOWN
+        confidence = acted_prob if outcome is Outcome.UP else 1.0 - acted_prob
         if confidence < prediction.min_confidence:
             return _skip(
                 SkipReason.LOW_CONFIDENCE,
@@ -249,6 +287,9 @@ class DecisionEngine:
 
         # Edge is measured against the price we would actually pay, not the
         # mid. Beating the mid by 3 cents is worth nothing if the spread is 4.
+        # And it uses the calibration-adjusted probability, so the EV reported
+        # is the one we are willing to stand behind rather than the model's
+        # unmoderated claim.
         edge = confidence - entry
         ev_per_usdc = edge / entry
         priced = {
@@ -302,6 +343,8 @@ class DecisionEngine:
             detail="all gates passed",
             model_prob_up=model_prob_up,
             raw_prob_up=raw_prob_up,
+            adjusted_prob_up=validation.adjusted_prob,
+            disagreement_logits=validation.disagreement,
             market_prob_up=market_prob,
             outcome=outcome,
             entry_price=entry,

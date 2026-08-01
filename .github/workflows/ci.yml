@@ -149,6 +149,45 @@ jobs:
       - name: Trading layer, simulator, and edge attribution
         run: pytest -q tests/test_trading.py tests/test_backtest.py tests/test_attribution.py
 
+      - name: Market edge validation ceilings hold
+        run: python scripts/validate_module85.py
+
+      - name: Module 8.5 unit tests
+        run: pytest -q tests/test_validation.py
+
+      - name: A pathological disagreement cannot become a trade
+        # The specific failure this module exists to prevent, measured on live
+        # data: model 0.2391 against a book pricing UP at 0.9750, reported as
+        # +2,074% expected value, lost the full stake. Every threshold before
+        # Module 8.5 was a floor, and floors cannot catch a broken model.
+        run: |
+          python - <<'PY'
+          from pmbtc.config import Config
+          from pmbtc.constants import SkipReason
+          from pmbtc.trading import DecisionEngine, Quote
+
+          config = Config()
+          book = Quote(best_bid=0.96, best_ask=0.97, bid_depth_usdc=500.0,
+                       ask_depth_usdc=500.0, age_ms=200)
+          d = DecisionEngine(config).decide(
+              model_prob_up=0.2391, quote=book,
+              seconds_into_window=270, seconds_to_settlement=30,
+          )
+          assert not d.trade, "pathological disagreement produced a trade"
+          assert d.skip_reason is SkipReason.EXCESSIVE_DISAGREEMENT, d.skip_reason
+          assert d.disagreement_logits > 4.0, d.disagreement_logits
+          # And the ceiling must not close the system down entirely.
+          fair = Quote(best_bid=0.49, best_ask=0.51, bid_depth_usdc=500.0,
+                       ask_depth_usdc=500.0, age_ms=200)
+          ok = DecisionEngine(config).decide(
+              model_prob_up=0.72, quote=fair,
+              seconds_into_window=120, seconds_to_settlement=180,
+          )
+          assert ok.trade, "the disagreement ceiling blocked an ordinary claim"
+          print("ceiling blocks", round(d.disagreement_logits, 2),
+                "logits and passes", round(ok.disagreement_logits, 2))
+          PY
+
       - name: Deployment gate refuses a small sample
         # The mirror of the readiness gate above: a gate that approves a
         # strategy on ten lucky trades is not a gate.

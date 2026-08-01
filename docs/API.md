@@ -189,12 +189,19 @@ The public surface of each package, taken from `__all__`.
 - **`CostModel`** *(class)* — Prices an entry against a quote. Pure: no clock, no network, no state.
 - **`Decision`** *(class)* — What to do about one window, and why.
 - **`DecisionEngine`** *(class)* — Applies the abstention gates to one window.
+- **`DisagreementMonitor`** *(class)* — Robust outlier detection over a model's own recent disagreements.
+- **`EdgeValidation`** *(class)* — Verdict on one model claim, plus the numbers behind it.
 - **`Fill`** *(class)* — The realised economics of one entry.
+- **`MarketEdgeValidator`** *(class)* — Applies the three ceilings and produces the calibration-adjusted view.
 - **`PositionSizer`** *(class)* — Turns a decision into an amount of money. Pure and deterministic.
 - **`Quote`** *(class)* — A two-sided quote for the UP token, with the depth standing behind it.
 - **`RiskLedger`** *(class)* — Tracks exposure and losses, and refuses trades that breach a limit.
 - **`RiskState`** *(class)* — Everything the limits are computed from.
 - **`Stake`** *(class)* — How much to stake, and what decided it.
+- **`blend_toward_market`** *(function)* — Shrink the model toward the market prior.
+- **`disagreement_logits`** *(function)* — How far the model is from the book, in log-odds. Always non-negative.
+- **`inv_logit`** *(function)* — 
+- **`logit`** *(function)* — Log-odds. The scale on which probability disagreements are comparable.
 
 ## `pmbtc.backtest`
 
@@ -202,14 +209,18 @@ The public surface of each package, taken from `__all__`.
 - **`BacktestMetrics`** *(class)* — Everything the deployment gate and the operator need to see.
 - **`BacktestReport`** *(class)* — Metrics, the gate's verdict, and the statistics behind it.
 - **`BacktestResult`** *(class)* — Every window the engine looked at, in order, plus how it ended.
+- **`CANDIDATE_HORIZONS`** *(object)* — Built-in immutable sequence.
 - **`ColumnMap`** *(class)* — Which dataset columns carry the book. Named once, in one place.
 - **`ConstantModel`** *(class)* — Always the same probability. Used to exercise the gates in tests.
+- **`DisagreementReport`** *(class)* — How far this model sits from the book, and how often.
 - **`EdgeDecomposition`** *(class)* — The full waterfall from raw forecast edge to realised profit.
 - **`EdgeLine`** *(class)* — One rung of the ladder.
+- **`EdgeScanReport`** *(class)* — The Module 8.5 verdict: is there evidence of edge anywhere, at all?
 - **`EstimatorModel`** *(class)* — Wraps a fitted estimator, pinning the column order it was trained on.
 - **`FillModel`** *(class)* — Prices and sizes an entry against the book that was recorded.
 - **`FillOutcome`** *(class)* — A fill, or a named reason there wasn't one.
 - **`GateCheck`** *(class)* — GateCheck(name: 'str', passed: 'bool', detail: 'str')
+- **`HorizonResult`** *(class)* — Out-of-sample record for one candidate horizon.
 - **`MarketProbabilityModel`** *(class)* — The book's own forecast. The null strategy, and the bar to beat.
 - **`ProbabilityModel`** *(object)* — 
 - **`StrategyFactory`** *(object)* — 
@@ -219,10 +230,12 @@ The public surface of each package, taken from `__all__`.
 - **`WindowResult`** *(class)* — One evaluated window — traded or not.
 - **`compute_metrics`** *(function)* — Summarise a completed run. Pure function of the run's windows.
 - **`decompose`** *(function)* — Attribute a completed run's P&L to its causes.
+- **`disagreement_distribution`** *(function)* — Measure model-versus-market disagreement over every priced window.
 - **`evaluate_backtest`** *(function)* — Score a completed run against ``config.backtest``.
 - **`quote_from_row`** *(function)* — Reconstruct the book as it stood at the snapshot instant.
 - **`run_strict_walk_forward`** *(function)* — Refit at every fold and trade only forward.
 - **`run_walk_forward`** *(function)* — Run and gate the backtest over every configured lookback.
+- **`scan_horizons`** *(function)* — Evaluate every candidate horizon out-of-sample and report stability.
 - **`slice_recent`** *(function)* — Rows settling within ``days`` of the last settlement in the data.
 
 ## `pmbtc.ops`

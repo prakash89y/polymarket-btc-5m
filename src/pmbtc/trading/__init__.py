@@ -25,15 +25,31 @@ from pmbtc.trading.costs import CostModel, Fill, Quote
 from pmbtc.trading.decision import Decision, DecisionEngine
 from pmbtc.trading.risk import RiskLedger, RiskState
 from pmbtc.trading.sizing import PositionSizer, Stake
+from pmbtc.trading.validation import (
+    DisagreementMonitor,
+    EdgeValidation,
+    MarketEdgeValidator,
+    blend_toward_market,
+    disagreement_logits,
+    inv_logit,
+    logit,
+)
 
 __all__ = [
     "CostModel",
     "Decision",
     "DecisionEngine",
+    "DisagreementMonitor",
+    "EdgeValidation",
     "Fill",
+    "MarketEdgeValidator",
     "PositionSizer",
     "Quote",
     "RiskLedger",
     "RiskState",
     "Stake",
+    "blend_toward_market",
+    "disagreement_logits",
+    "inv_logit",
+    "logit",
 ]

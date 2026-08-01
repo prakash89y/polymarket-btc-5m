@@ -14,6 +14,88 @@ one that does not.
 
 ---
 
+## [0.11.0] — 2026-08-01 — Module 8.5: market edge validation
+
+The statistical review of Module 8 found a specific, reproducible pathology.
+Every threshold in the system was a **floor** — a minimum confidence, a minimum
+edge, a minimum expected value — and a model's *apparent* edge grows with its
+error. The worse the forecast, the larger the disagreement with the book, the
+more eagerly the system traded, and the more reliably it took the opposite side
+of a market that turned out to be right.
+
+Measured at T-30 on collected data: median claimed edge **0.83 probability
+points**, median expected value **+680% per five-minute trade**, and **84% of
+intents taken against books quoted beyond 0.80**. One trade bought DOWN at 0.035
+against a market pricing UP at 0.975, on a model probability of 0.239, and
+reported +2,074% EV. It lost the full stake.
+
+This release supplies the missing ceilings. It adds no execution code, no paper
+trading, and no live trading.
+
+### Added
+
+**`pmbtc.trading.validation` — three ceilings.**
+- **Disagreement bound**, measured in **log-odds** rather than probability
+  points. Calling a 0.50 market at 0.75 is an ordinary opinion; calling a 0.97
+  market at 0.72 is an extraordinary one. Both are 0.25 in probability space and
+  indistinguishable there; in log-odds they are 1.10 and 2.53. Penalising
+  disagreement with confident books falls out of the arithmetic rather than
+  needing a special case. Default ceiling 1.5 logits.
+- **Plausibility band** (`min_plausible_prob`, default 0.02). No honest forecast
+  of a five-minute coin flip reaches 0.999; the logistic baseline emitted
+  exactly 0.001 on real data.
+- **Robust anomaly monitor**, median/MAD rather than mean/stdev — because the
+  thing being detected is precisely what corrupts a mean and inflates a standard
+  deviation until the next outlier looks unremarkable. Returns *no opinion*
+  rather than "normal" before it has enough history, so a cold start cannot wave
+  everything through.
+
+**Calibration-adjusted EV shrinks toward the market, not toward 0.5.** The
+review tested every implied-probability bucket at every horizon and found none
+mispriced (Bonferroni p >= 0.25 throughout). When the prior is "the book is
+right", the correct shrinkage target for an untrusted model is the book's price.
+Shrinking toward 0.5 would *manufacture* edge against confident markets — the
+exact error being corrected. `prediction.model_trust` defaults to 1.0, so the
+adjusted view is reported before it is enforced; what value is justified is an
+empirical question and `pmbtc edge-scan` is what answers it.
+
+**`pmbtc.backtest.edgescan` and `pmbtc edge-scan`.** Horizon choice by strict
+walk-forward only, with the model refit inside every fold at every candidate
+horizon — picking a horizon from the whole history would be the overfitting this
+module exists to prevent. A horizon is called STABLE only if it is profitable,
+profitable in **most folds**, *and* beats the book's own forecast: profit from
+one fold is a coincidence, a good Brier without profit is the trap Module 8 was
+built to expose, and profit without beating the market is unexplained. Also
+produces the edge stability report and the disagreement distribution histogram.
+
+Three new `SkipReason` members: `EXCESSIVE_DISAGREEMENT`,
+`IMPLAUSIBLE_PROBABILITY`, `ANOMALOUS_EDGE`.
+
+### Changed
+The disagreement ceiling is a deliberate behaviour change and it binds. Tests
+and the Module 8 validator that used `ConstantModel(0.9)`/`(0.95)` against a
+0.50 book (2.20 and 2.94 logits) now use 0.80 (1.39 logits) — they exercise
+fills, metrics and risk, not disagreement, and 0.80 is the strongest claim that
+clears the ceiling. CI additionally asserts the reviewed pathological trade
+cannot become a trade, *and* that an ordinary claim still can, so the ceiling
+cannot be tightened into a system that never trades.
+
+### Notes
+No schema moved. Six new config fields, all additive; the ceilings default ON
+because they prevent pathology, while blending defaults OFF because it is a
+modelling choice that must be evidenced first.
+
+Run against the collected data (98 markets), `pmbtc edge-scan` reports **NO
+EVIDENCE OF EDGE at any of 6 horizons**. The disagreement histogram explains
+why: the logistic baseline sits a median of **2.5–3.3 logits** from the book at
+every horizon, with **74–83% of windows over the ceiling** — categorically
+broken, at every horizon, and now visible in one report rather than derivable by
+hand. T-60 showed +82% return on stake, which the stability test correctly
+refuses: 3 trades, two folds with none, and Brier skill −0.59. Without the
+three-condition test somebody would have deployed it.
+
+---
+
 ## [0.10.0] — 2026-08-01 — Edge decomposition, strict walk-forward, EV gate
 
 Module 8 completed to its full brief. v0.9.0 built the probability-to-money

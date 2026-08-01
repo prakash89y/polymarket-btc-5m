@@ -149,8 +149,8 @@ def main() -> int:
         null.evaluated == 40 and sum(null.skip_histogram().values()) == 40,
         f"{null.evaluated} evaluated",
     )
-    win = BacktestEngine(config).run(rows(20, label=1), ConstantModel(0.95))
-    lose = BacktestEngine(config).run(rows(20, label=0), ConstantModel(0.95))
+    win = BacktestEngine(config).run(rows(20, label=1), ConstantModel(0.80))
+    lose = BacktestEngine(config).run(rows(20, label=0), ConstantModel(0.80))
     check(
         "the label never reaches the decision",
         win.windows[0].decision.as_dict() == lose.windows[0].decision.as_dict(),
@@ -170,7 +170,7 @@ def main() -> int:
     )
 
     console.print("\n[bold]8. Risk stops a confidently wrong model[/]")
-    doomed = BacktestEngine(config).run(rows(40, label=0), ConstantModel(0.95))
+    doomed = BacktestEngine(config).run(rows(40, label=0), ConstantModel(0.80))
     check(
         "a losing streak triggers a stand-down",
         len(doomed.trades) <= config.risk.max_consecutive_losses + 1,
@@ -182,7 +182,7 @@ def main() -> int:
     )
 
     console.print("\n[bold]9. The gate refuses to conclude from a small sample[/]")
-    lucky = BacktestEngine(config).run(rows(10, label=1), ConstantModel(0.95))
+    lucky = BacktestEngine(config).run(rows(10, label=1), ConstantModel(0.80))
     report = evaluate_backtest(config, lucky)
     metrics = compute_metrics(lucky)
     check(
@@ -198,7 +198,7 @@ def main() -> int:
 
     console.print("\n[bold]10. The edge decomposition reconciles exactly[/]")
     for label, name in ((1, "always up"), (0, "always down"), (None, "mixed")):
-        run = BacktestEngine(config).run(rows(40, label=label), ConstantModel(0.9))
+        run = BacktestEngine(config).run(rows(40, label=label), ConstantModel(0.80))
         decomposition = decompose(run, config.costs)
         realised = compute_metrics(run).net_pnl_usdc
         check(
@@ -208,7 +208,7 @@ def main() -> int:
         )
 
     console.print("\n[bold]11. Costs are attributed, not assumed away[/]")
-    winning = BacktestEngine(config).run(rows(40, label=1), ConstantModel(0.9))
+    winning = BacktestEngine(config).run(rows(40, label=1), ConstantModel(0.80))
     d = decompose(winning, config.costs)
     check(
         "crossing the spread costs money",
@@ -221,7 +221,7 @@ def main() -> int:
         f"{d.raw_edge_usdc:.2f} -> {d.net_profit_usdc:.2f} USDC",
     )
     losing = decompose(
-        BacktestEngine(config).run(rows(40, label=0), ConstantModel(0.95)), config.costs
+        BacktestEngine(config).run(rows(40, label=0), ConstantModel(0.80)), config.costs
     )
     check(
         "risk limits that block losers show as a saving",
@@ -259,15 +259,15 @@ def main() -> int:
         f"max purge {max((f.purged_markets for f in wf.folds), default=0)} market(s)",
     )
     repeat = run_strict_walk_forward(
-        config, rows(120), lambda _: ConstantModel(0.85), n_folds=3
+        config, rows(120), lambda _: ConstantModel(0.80), n_folds=3
     )
     again = run_strict_walk_forward(
-        config, rows(120), lambda _: ConstantModel(0.85), n_folds=3
+        config, rows(120), lambda _: ConstantModel(0.80), n_folds=3
     )
     check("strict walk-forward is deterministic", repeat.as_dict() == again.as_dict())
 
     console.print("\n[bold]14. A better Brier score is not a deployment reason[/]")
-    doomed = BacktestEngine(config).run(rows(40, label=0), ConstantModel(0.95))
+    doomed = BacktestEngine(config).run(rows(40, label=0), ConstantModel(0.80))
     verdict = evaluate_backtest(config, doomed)
     ev_check = next(c for c in verdict.checks if c.name == "positive_ev_after_costs")
     check("the gate demands positive EV after costs", not ev_check.passed, ev_check.detail)
