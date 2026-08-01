@@ -871,6 +871,91 @@ def backtest(
         raise typer.Exit(code=1)
 
 
+@app.command("edge-scan")
+def edge_scan(
+    config: ConfigOption = None,
+    model: Annotated[
+        str, typer.Option("--model", help="market | logistic | gradient_boosting")
+    ] = "logistic",
+    folds: Annotated[int, typer.Option("--folds", help="Walk-forward folds per horizon.")] = 4,
+    trust: Annotated[
+        float | None,
+        typer.Option("--trust", help="Override prediction.model_trust for this scan."),
+    ] = None,
+) -> None:
+    """Module 8.5: is there evidence of genuine edge, at any horizon?
+
+    Every horizon is evaluated by strict walk-forward with the model refitted
+    inside each fold, so no horizon is ever chosen using data it was scored on.
+    A horizon is called STABLE only if it is profitable, profitable in most
+    folds, *and* beats the book's own forecast — one of those alone is a
+    coincidence, a trap, or unexplained.
+
+    Places no orders and simulates no live trading.
+    """
+    from collections.abc import Mapping, Sequence
+
+    import numpy as np
+
+    from pmbtc.backtest import (
+        BacktestEngine,
+        EstimatorModel,
+        MarketProbabilityModel,
+        ProbabilityModel,
+        scan_horizons,
+    )
+    from pmbtc.dataset import build_rows, open_dataset_store
+    from pmbtc.models.baselines import GradientBoostingBaseline, LogisticBaseline
+
+    cfg = _load(config)
+    if trust is not None:
+        cfg = _load(config).model_copy(
+            update={"prediction": cfg.prediction.model_copy(update={"model_trust": trust})}
+        )
+    configure_logging(cfg)
+    store = open_dataset_store(cfg)
+    rows, _ = build_rows({m.condition_id: m for m in store.markets()}, store.snapshots())
+    if not rows:
+        console.print("[yellow]No labelled rows to scan.[/]")
+        raise typer.Exit(code=1)
+
+    columns = sorted({k for r in rows for k in r if k.startswith("f_")})
+    seed = cfg.model.random_seed
+
+    def fit(train_rows: Sequence[Mapping[str, object]]) -> ProbabilityModel:
+        if model == "market":
+            return MarketProbabilityModel()
+        x = np.array([[_num(r.get(c)) for c in columns] for r in train_rows], dtype=float)
+        y = np.array([r["label"] for r in train_rows], dtype=int)
+        if len(set(y.tolist())) < 2:
+            return MarketProbabilityModel()
+        estimator = (
+            GradientBoostingBaseline(seed)
+            if model == "gradient_boosting"
+            else LogisticBaseline(seed)
+        )
+        estimator.fit(x, y)
+        return EstimatorModel(estimator, columns, name=model)
+
+    markets = len({r["condition_id"] for r in rows})
+    console.print(
+        f"markets={markets} rows={len(rows)} model={model} folds={folds} "
+        f"trust={cfg.prediction.model_trust:.2f} "
+        f"ceiling={cfg.prediction.max_disagreement_logits:.2f} logits"
+    )
+    report = scan_horizons(
+        cfg, rows, fit, engine=BacktestEngine(cfg), model_name=model, n_folds=folds
+    )
+    console.print(report.render())
+
+    out = cfg.resolved_path(cfg.app.artifact_dir) / "reports" / f"edge-scan-{model}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report.as_dict(), indent=2), encoding="utf-8")
+    console.print(f"\nreport: {out}")
+    if not report.any_evidence_of_edge:
+        raise typer.Exit(code=1)
+
+
 @app.command()
 def paths(config: ConfigOption = None) -> None:
     """Create and list the runtime directories."""

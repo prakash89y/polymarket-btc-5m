@@ -145,6 +145,14 @@ class SkipReason(StrEnum):
     MODEL_UNCALIBRATED = "model_uncalibrated"
     DUPLICATE_POSITION = "duplicate_position"
     SIZE_BELOW_MINIMUM = "size_below_minimum"
+    #: Module 8.5. The model disagreed with a liquid, well-calibrated book by
+    #: more than any forecast of a 5-minute coin flip can justify. Every other
+    #: threshold in this enum is a floor; these three are ceilings, and they
+    #: exist because a broken model produces *larger* apparent edge, not
+    #: smaller, and therefore trades more eagerly the worse it gets.
+    EXCESSIVE_DISAGREEMENT = "excessive_disagreement"
+    IMPLAUSIBLE_PROBABILITY = "implausible_probability"
+    ANOMALOUS_EDGE = "anomalous_edge"
 
 
 class ModelName(StrEnum):

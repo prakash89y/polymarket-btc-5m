@@ -160,14 +160,14 @@ class TestBacktestEngine:
 
     def test_an_always_up_model_wins_on_always_up_data(self, config: Config) -> None:
         rows = [make_row(i, h, label=1) for i in range(40) for h in HORIZONS]
-        result = BacktestEngine(config).run(rows, ConstantModel(0.95), model_name="always-up")
+        result = BacktestEngine(config).run(rows, ConstantModel(0.80), model_name="always-up")
         assert len(result.trades) > 0
         assert all(w.won for w in result.trades)
         assert result.ending_bankroll_usdc > result.starting_bankroll_usdc
 
     def test_an_always_up_model_loses_on_always_down_data(self, config: Config) -> None:
         rows = [make_row(i, h, label=0) for i in range(40) for h in HORIZONS]
-        result = BacktestEngine(config).run(rows, ConstantModel(0.95), model_name="always-up")
+        result = BacktestEngine(config).run(rows, ConstantModel(0.80), model_name="always-up")
         assert len(result.trades) > 0
         assert not any(w.won for w in result.trades)
         assert result.ending_bankroll_usdc < result.starting_bankroll_usdc
@@ -177,7 +177,7 @@ class TestBacktestEngine:
     ) -> None:
         """The risk layer must stop a confidently wrong model, not follow it down."""
         rows = [make_row(i, h, label=0) for i in range(40) for h in HORIZONS]
-        result = BacktestEngine(config).run(rows, ConstantModel(0.95))
+        result = BacktestEngine(config).run(rows, ConstantModel(0.80))
         assert len(result.trades) <= config.risk.max_consecutive_losses + 1
         assert SkipReason.RISK_LIMIT.value in result.skip_histogram()
 
@@ -186,10 +186,10 @@ class TestBacktestEngine:
         P&L that follows from it."""
         engine = BacktestEngine(config)
         up = engine.run([make_row(i, h, label=1) for i in range(20) for h in HORIZONS],
-                        ConstantModel(0.95))
+                        ConstantModel(0.80))
         down = BacktestEngine(config).run(
             [make_row(i, h, label=0) for i in range(20) for h in HORIZONS],
-            ConstantModel(0.95),
+            ConstantModel(0.80),
         )
         # The first decision is taken before any P&L exists, so it must match.
         assert up.windows[0].decision.as_dict() == down.windows[0].decision.as_dict()
@@ -203,7 +203,7 @@ class TestBacktestEngine:
 
     def test_thin_books_are_refused_not_filled(self, config: Config) -> None:
         rows = make_dataset(depth=1.0)
-        result = BacktestEngine(config).run(rows, ConstantModel(0.95))
+        result = BacktestEngine(config).run(rows, ConstantModel(0.80))
         assert result.trades == []
         assert SkipReason.INSUFFICIENT_LIQUIDITY.value in result.skip_histogram()
 
@@ -222,7 +222,7 @@ class TestMetrics:
         """A contract bought at ~0.515 must win ~51.5% of the time to break even —
         which is the whole reason a 50/50 market is not a free bet."""
         rows = [make_row(i, h, label=i % 2) for i in range(40) for h in HORIZONS]
-        result = BacktestEngine(config).run(rows, ConstantModel(0.95))
+        result = BacktestEngine(config).run(rows, ConstantModel(0.80))
         metrics = compute_metrics(result)
         assert metrics.trades > 0
         assert metrics.breakeven_win_rate == pytest.approx(metrics.avg_entry_price)
@@ -245,7 +245,7 @@ class TestMetrics:
 
     def test_profit_factor_without_losses_is_finite(self, config: Config) -> None:
         rows = [make_row(i, h, label=1) for i in range(10) for h in HORIZONS]
-        metrics = compute_metrics(BacktestEngine(config).run(rows, ConstantModel(0.95)))
+        metrics = compute_metrics(BacktestEngine(config).run(rows, ConstantModel(0.80)))
         assert metrics.gross_loss_usdc == pytest.approx(0.0)
         assert metrics.profit_factor == pytest.approx(metrics.gross_profit_usdc)
 
@@ -258,7 +258,7 @@ class TestDeploymentGate:
         """Ten perfect trades is not evidence. This is the check that matters
         while the dataset is still hours old."""
         rows = [make_row(i, h, label=1) for i in range(10) for h in HORIZONS]
-        result = BacktestEngine(config).run(rows, ConstantModel(0.95))
+        result = BacktestEngine(config).run(rows, ConstantModel(0.80))
         report = evaluate_backtest(config, result)
         assert result.ending_bankroll_usdc > result.starting_bankroll_usdc
         assert not report.conclusive

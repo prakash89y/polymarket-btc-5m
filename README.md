@@ -21,6 +21,7 @@ begins.
 | 6 | Feature engineering pipeline | **done** |
 | 7 | Model training (GBDT / sequence / ensemble + calibration) | **framework done, gated** |
 | 8 | Trading layer + backtesting framework | **done** |
+| 8.5 | Market edge validation (disagreement ceilings) | **done** |
 | 9 | Paper trading engine | pending |
 | 10 | Live execution engine | pending |
 | 11 | Monitoring dashboard | pending |
@@ -146,6 +147,24 @@ A cost model that lived inside the simulator would be re-implemented, slightly
 differently, by the live path, and the difference would only ever show up in the
 P&L.
 
+**Every threshold was a floor; a broken model needs ceilings.** `min_confidence`,
+`min_edge`, `min_ev` are all minimums, and a model's *apparent* edge grows with
+its error — so the worse the forecast, the more eagerly the system traded.
+Measured at T-30 on collected data, the logistic baseline claimed a median edge
+of 0.83 probability points and +680% expected value per five-minute trade, with
+84% of its intents taken against books quoted beyond 0.80. Module 8.5 bounds
+disagreement in **log-odds**, because calling a 0.50 market at 0.75 is an
+ordinary opinion while calling a 0.97 market at 0.72 is an extraordinary one —
+identical in probability space (0.25), 1.10 versus 2.53 in log-odds.
+
+**The shrinkage target is the market, not a coin flip.** Every implied
+probability bucket was tested at every horizon and none was mispriced
+(Bonferroni p ≥ 0.25 throughout). When the prior is "the book is right", an
+untrusted model should be shrunk toward the book's price; shrinking toward 0.5
+would *manufacture* edge against confident markets, which is the error being
+corrected. `pmbtc edge-scan` reports the calibration-adjusted view, the
+per-horizon stability record, and the disagreement histogram.
+
 **No model ships without beating the benchmarks.** Random, market-favourite,
 market-underdog, logistic, and gradient boosting — scored on Brier and log loss,
 not accuracy, on a chronological holdout. The market-favourite baseline is the
@@ -243,6 +262,8 @@ src/pmbtc/models/         readiness gate + benchmark baselines
 src/pmbtc/trading/        probability -> position (Module 8, shared with 9/10)
   costs.py                one cost model: spread, slippage, fees, payoff
   decision.py             the abstention gates; every refusal is named
+  validation.py           the ceilings (8.5): log-odds disagreement bound,
+                          plausibility band, robust anomaly monitor
   sizing.py               fractional Kelly, capped well below it
   risk.py                 daily/weekly loss, streaks, exposure, kill switch
 src/pmbtc/backtest/       the simulator (Module 8)
@@ -252,6 +273,7 @@ src/pmbtc/backtest/       the simulator (Module 8)
   attribution.py          the edge waterfall; reconciles exactly, or says so
   report.py               the deployment gate, incl. positive EV after costs
   walkforward.py          lookback gating + strict refit-per-fold walk-forward
+  edgescan.py             horizon choice, edge stability, disagreement shape
   adapters.py             any estimator -> a probability callable
 src/pmbtc/clock.py        UTC sync, drift detection, pre-settlement safety gate
 src/pmbtc/metrics.py      counters/gauges/histograms + Prometheus rendering

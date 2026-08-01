@@ -192,7 +192,9 @@ class TestDecisionEngine:
         thin = Quote(
             best_bid=0.49, best_ask=0.51, bid_depth_usdc=5.0, ask_depth_usdc=5.0
         )
-        decision = self._decide(config, thin, 0.9)
+        # 0.80 rather than 0.90: Module 8.5's disagreement ceiling would
+        # otherwise reject 0.90 against a 0.50 book before the depth gate.
+        decision = self._decide(config, thin, 0.80)
         assert decision.skip_reason is SkipReason.INSUFFICIENT_LIQUIDITY
 
     def test_low_confidence_is_refused(self, config: Config, quote: Quote) -> None:
@@ -206,7 +208,7 @@ class TestDecisionEngine:
         modest = self._decide(config, quote, 0.60, **late)
         assert modest.skip_reason is SkipReason.EDGE_TOO_SMALL
         assert modest.trade is False
-        strong = self._decide(config, quote, 0.90, **late)
+        strong = self._decide(config, quote, 0.80, **late)
         assert strong.trade
 
     def test_clock_no_submit_window_cannot_be_overridden_by_edge(

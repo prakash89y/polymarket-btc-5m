@@ -40,6 +40,14 @@ from pmbtc.backtest.adapters import (
     MarketProbabilityModel,
 )
 from pmbtc.backtest.attribution import EdgeDecomposition, EdgeLine, decompose
+from pmbtc.backtest.edgescan import (
+    CANDIDATE_HORIZONS,
+    DisagreementReport,
+    EdgeScanReport,
+    HorizonResult,
+    disagreement_distribution,
+    scan_horizons,
+)
 from pmbtc.backtest.engine import (
     BacktestEngine,
     BacktestResult,
@@ -62,18 +70,22 @@ from pmbtc.backtest.walkforward import (
 )
 
 __all__ = [
+    "CANDIDATE_HORIZONS",
     "BacktestEngine",
     "BacktestMetrics",
     "BacktestReport",
     "BacktestResult",
     "ColumnMap",
     "ConstantModel",
+    "DisagreementReport",
     "EdgeDecomposition",
     "EdgeLine",
+    "EdgeScanReport",
     "EstimatorModel",
     "FillModel",
     "FillOutcome",
     "GateCheck",
+    "HorizonResult",
     "MarketProbabilityModel",
     "ProbabilityModel",
     "StrategyFactory",
@@ -83,9 +95,11 @@ __all__ = [
     "WindowResult",
     "compute_metrics",
     "decompose",
+    "disagreement_distribution",
     "evaluate_backtest",
     "quote_from_row",
     "run_strict_walk_forward",
     "run_walk_forward",
+    "scan_horizons",
     "slice_recent",
 ]

@@ -181,6 +181,7 @@ decision in a backtest as it does at 3 a.m. against the live book.
 | `decision` | The decision gate: probability in, position or a named refusal out. |
 | `risk` | Portfolio risk limits — the layer that survives a wrong model. |
 | `sizing` | Position sizing: fractional Kelly, with the caps that matter more than Kelly. |
+| `validation` | Market edge validation — Module 8.5. |
 
 ## `pmbtc.backtest`
 
@@ -221,6 +222,7 @@ however good the numbers look.
 |---|---|
 | `adapters` | Adapters from "a thing that predicts" to the engine's probability callable. |
 | `attribution` | Edge decomposition: where the money actually came from, and where it went. |
+| `edgescan` | Module 8.5 reports: horizon choice, edge stability, disagreement shape. |
 | `engine` | The simulator. |
 | `fills` | What the book would actually have given us. |
 | `metrics` | Performance metrics for a completed run. |

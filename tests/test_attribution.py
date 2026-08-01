@@ -82,7 +82,7 @@ class TestReconciliation:
     ) -> None:
         """Across winning, losing and mixed runs, thick book and thin."""
         result = BacktestEngine(config).run(
-            make_rows(40, label=label, depth=depth), ConstantModel(0.9)
+            make_rows(40, label=label, depth=depth), ConstantModel(0.80)
         )
         decomposition = decompose(result, config.costs)
         metrics = compute_metrics(result)
@@ -93,7 +93,7 @@ class TestReconciliation:
         )
 
     def test_walking_the_lines_by_hand_reaches_net_profit(self, config: Config) -> None:
-        result = BacktestEngine(config).run(make_rows(40), ConstantModel(0.85))
+        result = BacktestEngine(config).run(make_rows(40), ConstantModel(0.80))
         d = decompose(result, config.costs)
         walked = (
             d.raw_edge_usdc
@@ -117,7 +117,9 @@ class TestReconciliation:
 # What the lines mean
 # --------------------------------------------------------------------------- #
 class TestAttributionSemantics:
-    @pytest.mark.parametrize("prob", [0.9, 0.1])
+    # 0.80/0.20 rather than 0.90/0.10: Module 8.5 caps disagreement with the
+    # book at 1.5 logits, and 0.90 against a 0.50 book is 2.20.
+    @pytest.mark.parametrize("prob", [0.80, 0.20])
     @pytest.mark.parametrize("label", [0, 1, None])
     def test_crossing_the_spread_is_never_a_benefit(
         self, config: Config, prob: float, label: int | None
@@ -145,7 +147,7 @@ class TestAttributionSemantics:
         assert d.reconciles()
 
     def test_the_spread_bites_whenever_a_trade_wins(self, config: Config) -> None:
-        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.9))
+        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.80))
         d = decompose(result, config.costs)
         assert d.filled > 0
         assert d.spread_cost_usdc > 0.0
@@ -157,7 +159,7 @@ class TestAttributionSemantics:
         the pricing is what the bug corrupted.
         """
         result = BacktestEngine(config).run(
-            make_rows(20, bid=0.05, ask=0.06), ConstantModel(0.001)
+            make_rows(20, bid=0.05, ask=0.06), ConstantModel(0.05)
         )
         priced = [w for w in result.windows if w.decision.outcome is not None]
         assert priced
@@ -171,7 +173,7 @@ class TestAttributionSemantics:
     ) -> None:
         """A negative cost is information, not a bug: standing down after a
         losing streak on an always-losing tape saves money."""
-        result = BacktestEngine(config).run(make_rows(40, label=0), ConstantModel(0.95))
+        result = BacktestEngine(config).run(make_rows(40, label=0), ConstantModel(0.80))
         d = decompose(result, config.costs)
         assert d.blocked_by_risk > 0
         assert d.risk_limit_usdc < 0.0
@@ -185,7 +187,7 @@ class TestAttributionSemantics:
         abstention rather than a missed fill. The fill model's depth check is a
         second line of defence, not the first."""
         result = BacktestEngine(config).run(
-            make_rows(40, label=1, depth=1.0), ConstantModel(0.9)
+            make_rows(40, label=1, depth=1.0), ConstantModel(0.80)
         )
         d = decompose(result, config.costs)
         assert d.intents == 0
@@ -210,7 +212,7 @@ class TestAttributionSemantics:
         )
         result = BacktestEngine(config).run(
             make_rows(40, label=1, depth=50.0),
-            ConstantModel(0.9),
+            ConstantModel(0.80),
             starting_bankroll_usdc=10_000.0,
         )
         d = decompose(result, config.costs)
@@ -223,7 +225,7 @@ class TestAttributionSemantics:
         refuses — and that refusal lands on the missed-fill line."""
         config = Config(execution={"min_book_depth_usdc": 0.0})
         result = BacktestEngine(config).run(
-            make_rows(40, label=1, depth=0.0), ConstantModel(0.9)
+            make_rows(40, label=1, depth=0.0), ConstantModel(0.80)
         )
         d = decompose(result, config.costs)
         assert d.intents > 0
@@ -236,12 +238,12 @@ class TestAttributionSemantics:
         self, config: Config
     ) -> None:
         """The point of the whole module: forecast edge is not profit."""
-        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.9))
+        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.80))
         d = decompose(result, config.costs)
         assert d.raw_edge_usdc > d.net_profit_usdc
 
     def test_render_is_readable_and_flags_a_break(self, config: Config) -> None:
-        result = BacktestEngine(config).run(make_rows(40), ConstantModel(0.9))
+        result = BacktestEngine(config).run(make_rows(40), ConstantModel(0.80))
         d = decompose(result, config.costs)
         text = d.render()
         for line in ("raw_edge", "spread_cost", "missed_fills", "net_profit"):
@@ -256,7 +258,7 @@ class TestExecutionMetrics:
     def test_all_required_execution_metrics_are_populated(
         self, config: Config
     ) -> None:
-        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.9))
+        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.80))
         m = compute_metrics(result)
         assert m.trades > 0
         assert m.fill_attempts >= m.trades
@@ -289,7 +291,7 @@ class TestExecutionMetrics:
     def test_fill_rate_ignores_risk_refusals(self, config: Config) -> None:
         """A trade the risk engine refused never reached the book, so counting
         it as a fill failure would blame the venue for our own limit."""
-        result = BacktestEngine(config).run(make_rows(40, label=0), ConstantModel(0.95))
+        result = BacktestEngine(config).run(make_rows(40, label=0), ConstantModel(0.80))
         m = compute_metrics(result)
         risk_blocked = result.skip_histogram().get(SkipReason.RISK_LIMIT.value, 0)
         assert risk_blocked > 0
@@ -302,7 +304,7 @@ class TestExecutionMetrics:
 # --------------------------------------------------------------------------- #
 class TestExpectedValueGate:
     def test_the_gate_requires_positive_ev_after_costs(self, config: Config) -> None:
-        result = BacktestEngine(config).run(make_rows(40, label=0), ConstantModel(0.95))
+        result = BacktestEngine(config).run(make_rows(40, label=0), ConstantModel(0.80))
         report = evaluate_backtest(config, result)
         check = next(c for c in report.checks if c.name == "positive_ev_after_costs")
         assert not check.passed
@@ -310,7 +312,7 @@ class TestExpectedValueGate:
     def test_the_gate_checks_that_the_decomposition_reconciles(
         self, config: Config
     ) -> None:
-        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.9))
+        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.80))
         report = evaluate_backtest(config, result)
         check = next(c for c in report.checks if c.name == "decomposition_reconciles")
         assert check.passed
@@ -322,7 +324,7 @@ class TestExpectedValueGate:
         assert not check.passed
 
     def test_the_report_renders_the_decomposition(self, config: Config) -> None:
-        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.9))
+        result = BacktestEngine(config).run(make_rows(40, label=1), ConstantModel(0.80))
         text = evaluate_backtest(config, result).render()
         assert "edge decomposition" in text
         assert "execution quality" in text
@@ -362,7 +364,7 @@ class TestLatencyAndShrinkage:
             best_bid=0.49, best_ask=0.51, bid_depth_usdc=500.0, ask_depth_usdc=500.0,
             age_ms=1_800,
         )
-        assert self._decide(config, quote, 0.9).trade
+        assert self._decide(config, quote, 0.80).trade
 
     def test_shrinkage_pulls_toward_a_coin_flip(self) -> None:
         assert shrink_toward_fair(0.9, 0.0) == pytest.approx(0.9)
@@ -441,7 +443,7 @@ class TestStrictWalkForward:
         rows = make_rows(120)
         runs = [
             run_strict_walk_forward(
-                config, rows, lambda _: ConstantModel(0.85), n_folds=3
+                config, rows, lambda _: ConstantModel(0.80), n_folds=3
             ).as_dict()
             for _ in range(2)
         ]
