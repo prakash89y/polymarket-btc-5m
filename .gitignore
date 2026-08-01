@@ -94,12 +94,16 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual environments
-.venv/
-venv/
+# Virtual environments. Globbed rather than named: a venv called `.venv-ci` or
+# `venv313` is still a venv, and an exact-name rule would let it be scanned and
+# committed. Found by a hygiene run against a throwaway `.venv-ci`.
+.venv*/
+venv*/
 ENV/
 env/
 .virtualenv/
+*.egg-link
+pyvenv.cfg
 
 # =============================================================================
 # Tooling caches

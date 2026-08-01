@@ -12,6 +12,39 @@ one that does not.
 
 ---
 
+## [0.8.3] — 2026-08-01 — Dependency audit on a clean runner
+
+### Fixed
+- `pip-audit` failed with *"pmbtc: Dependency not found on PyPI and could not be
+  audited"*. The local project is installed editable and is not published, so
+  dependency collection fails on it, and `--strict` — which means *fail if
+  collection fails on any dependency* — makes that fatal.
+
+  `--skip-editable` is **not** the fix: skipping is itself a collection failure
+  under `--strict`, so the combination still fails. It would also be the wrong
+  mechanism, blanket-skipping *every* editable install — a third-party package
+  installed editable would silently drop out of the audit, which is exactly the
+  hole a security check must not have.
+
+  Instead `scripts/audit_dependencies.py` builds the audit set explicitly: every
+  installed **non-editable** distribution, pinned, audited with
+  `--strict --no-deps`. `pip list` already reports the full transitive closure,
+  so the set is complete by construction rather than by resolution. Two guards
+  keep the exclusion honest — the only editable distribution must be the local
+  project, and the set must be non-trivially large so a broken `pip list` cannot
+  pass by auditing nothing.
+- `.gitignore` matched only exactly-named virtualenvs, so a venv called
+  `.venv-ci` or `venv313` would be scanned and could be committed. Now globbed.
+  Found by running the hygiene check against a throwaway environment.
+
+### Notes
+- Strictness is unchanged; only the *set* being audited changed. Verified: 92
+  packages locally and 76 in a fresh clean-clone environment, `pmbtc` absent,
+  exit 0. Negative control — `jinja2==2.11.2` reports 5 vulnerabilities — so the
+  scan is armed rather than merely passing.
+
+---
+
 ## [0.8.2] — 2026-08-01 — Deterministic CI without collected data
 
 ### Fixed
@@ -232,7 +265,8 @@ about making the previous seven reproducible and hard to regress.
   redaction, UTC window arithmetic, typed errors, Docker, test suite.
 - Live trading triple-gated and off by default.
 
-[Unreleased]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.7.0...v0.8.0
