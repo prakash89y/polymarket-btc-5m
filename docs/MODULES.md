@@ -220,6 +220,7 @@ however good the numbers look.
 | submodule | summary |
 |---|---|
 | `adapters` | Adapters from "a thing that predicts" to the engine's probability callable. |
+| `attribution` | Edge decomposition: where the money actually came from, and where it went. |
 | `engine` | The simulator. |
 | `fills` | What the book would actually have given us. |
 | `metrics` | Performance metrics for a completed run. |

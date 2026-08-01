@@ -122,7 +122,22 @@ actually resting, and treats an unknown book as no book. Break-even is the
 average price paid, not 50% — a contract bought at 0.62 has to win 62% of the
 time to return the stake. And a result on fewer than `backtest.min_trades`
 trades is reported as **inconclusive** and fails the gate however good it looks,
-because ten lucky trades is not evidence.
+because ten lucky trades is not evidence. A model is never promoted for a better
+Brier score alone: `positive_ev_after_costs` is a separate, mandatory gate.
+
+**Every run says where the money went.** The report is a waterfall from the raw
+forecast edge to realised P&L, built as six counterfactual worlds that each
+change exactly one thing, so
+
+```
+raw_edge − spread − slippage − fees − risk_limits − missed_fills == net_profit
+```
+
+holds *exactly* and is asserted against the ledger on every run. Cost lines may
+come out negative, and that is information: risk limits which block a losing
+trade show up as a saving. This is not decoration — on the collected data it
+showed a strategy with **+239 USDC of genuine forecast edge** losing money, with
+42 going to spread and slippage and 212 to trades the risk engine refused.
 
 **The cost model is written once.** `pmbtc.trading` holds the whole path from a
 probability to a position — decision gates, cost model, sizing, risk ledger —
@@ -233,9 +248,10 @@ src/pmbtc/trading/        probability -> position (Module 8, shared with 9/10)
 src/pmbtc/backtest/       the simulator (Module 8)
   engine.py               chronological replay; the label only settles
   fills.py                touch/mid/aggressive, depth-capped, pessimistic
-  metrics.py              ROI, profit factor, Sharpe, drawdown, Brier
-  report.py               the deployment gate
-  walkforward.py          every configured lookback must pass
+  metrics.py              money + forecast quality (calibration reused from 7)
+  attribution.py          the edge waterfall; reconciles exactly, or says so
+  report.py               the deployment gate, incl. positive EV after costs
+  walkforward.py          lookback gating + strict refit-per-fold walk-forward
   adapters.py             any estimator -> a probability callable
 src/pmbtc/clock.py        UTC sync, drift detection, pre-settlement safety gate
 src/pmbtc/metrics.py      counters/gauges/histograms + Prometheus rendering

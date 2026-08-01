@@ -93,6 +93,20 @@ def quote_from_row(row: Row, columns: ColumnMap = ColumnMap()) -> Quote:
     )
 
 
+def _outcome_mid(quote: Quote, outcome: Outcome | None) -> float:
+    """Fair (spread-free) price of the outcome we are buying.
+
+    The DOWN token is the complement of UP, so its mid is ``1 - mid_up``. The
+    invariant this protects is ``touch >= mid`` for *both* directions — that is
+    what makes "crossing the spread" a cost rather than, on a book quoted near
+    0.05, an apparent windfall.
+    """
+    mid = quote.mid
+    if mid is None or outcome is None:
+        return 0.0
+    return mid if outcome is Outcome.UP else 1.0 - mid
+
+
 @dataclass(frozen=True, slots=True)
 class WindowResult:
     """One evaluated window — traded or not."""
@@ -110,9 +124,37 @@ class WindowResult:
     bankroll_after_usdc: float = 0.0
     skip_reason: SkipReason | None = None
 
+    # --- counterfactual inputs, recorded on every intent ---------------- #
+    # Edge decomposition needs to price the trades we *wanted* as well as the
+    # ones we got, so these are populated whenever sizing produced a stake —
+    # including when risk or depth then refused it.
+    #: Stake the sizer asked for, before risk and depth had their say.
+    desired_stake_usdc: float = 0.0
+    #: Mid **of the outcome being bought** — the price in a world with no
+    #: spread. For DOWN this is ``1 - mid_up``, because the DOWN token is the
+    #: complement. Storing the raw UP mid here would make every DOWN trade's
+    #: raw edge and spread cost nonsense, and on a book quoted near 0.05 it
+    #: would report crossing the spread as a *profit*.
+    mid_price: float = 0.0
+    #: Price at the touch, before slippage.
+    touch_price: float = 0.0
+    quoted_spread: float = 0.0
+    #: True once an intent reached the fill model — the denominator of fill rate.
+    fill_attempted: bool = False
+
     @property
     def traded(self) -> bool:
         return self.fill is not None
+
+    @property
+    def intended(self) -> bool:
+        """The strategy wanted this trade and had sized it."""
+        return self.desired_stake_usdc > 0.0
+
+    @property
+    def holding_seconds(self) -> float:
+        """Entry to settlement. Positions are held to settlement by default."""
+        return float(self.horizon_seconds) if self.traded else 0.0
 
     @property
     def won(self) -> bool:
@@ -142,6 +184,11 @@ class WindowResult:
             "pnl_usdc": round(self.pnl_usdc, 6),
             "bankroll_after_usdc": round(self.bankroll_after_usdc, 6),
             "skip_reason": self.skip_reason.value if self.skip_reason else None,
+            "desired_stake_usdc": round(self.desired_stake_usdc, 6),
+            "mid_price": round(self.mid_price, 6),
+            "touch_price": round(self.touch_price, 6),
+            "quoted_spread": round(self.quoted_spread, 6),
+            "fill_attempted": self.fill_attempted,
             "decision": self.decision.as_dict(),
             "stake": self.stake.as_dict() if self.stake else None,
             "fill": (
@@ -292,6 +339,7 @@ class BacktestEngine:
             stake: Stake | None = None,
             fill: Fill | None = None,
             pnl: float = 0.0,
+            fill_attempted: bool = False,
         ) -> WindowResult:
             return WindowResult(
                 condition_id=str(row.get("condition_id", "")),
@@ -306,6 +354,15 @@ class BacktestEngine:
                 pnl_usdc=pnl,
                 bankroll_after_usdc=ledger.state.bankroll_usdc,
                 skip_reason=skip,
+                desired_stake_usdc=stake.usdc if stake and stake.accepted else 0.0,
+                mid_price=_outcome_mid(quote, decision.outcome),
+                touch_price=(
+                    self.costs.touch_price(decision.outcome, quote) or 0.0
+                    if decision.outcome
+                    else 0.0
+                ),
+                quoted_spread=quote.spread or 0.0,
+                fill_attempted=fill_attempted,
             )
 
         decision = self.decisions.decide(
@@ -341,7 +398,11 @@ class BacktestEngine:
         )
         if filled.fill is None:
             return result(
-                decision, status=TradeStatus.REJECTED, skip=filled.skip_reason, stake=stake
+                decision,
+                status=TradeStatus.REJECTED,
+                skip=filled.skip_reason,
+                stake=stake,
+                fill_attempted=True,
             )
 
         fill = filled.fill
@@ -353,7 +414,8 @@ class BacktestEngine:
                 now_ms=settlement_ms, cost_usdc=fill.cost_usdc, payoff_usdc=fill.cost_usdc
             )
             return result(
-                decision, status=TradeStatus.VOIDED, skip=None, stake=stake, fill=fill
+                decision, status=TradeStatus.VOIDED, skip=None, stake=stake,
+                fill=fill, fill_attempted=True,
             )
 
         # Redemption gas is charged inside the payoff so the ledger's bankroll
@@ -364,7 +426,10 @@ class BacktestEngine:
             now_ms=settlement_ms, cost_usdc=fill.cost_usdc, payoff_usdc=net_payoff
         )
         status = TradeStatus.SETTLED_WIN if payoff > 0 else TradeStatus.SETTLED_LOSS
-        return result(decision, status=status, skip=None, stake=stake, fill=fill, pnl=pnl)
+        return result(
+            decision, status=status, skip=None, stake=stake, fill=fill, pnl=pnl,
+            fill_attempted=True,
+        )
 
     # ------------------------------------------------------------------ #
     # Row plumbing

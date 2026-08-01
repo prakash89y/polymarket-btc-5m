@@ -146,8 +146,8 @@ jobs:
       - name: Backtest cannot flatter itself
         run: python scripts/validate_module8.py
 
-      - name: Trading layer and simulator
-        run: pytest -q tests/test_trading.py tests/test_backtest.py
+      - name: Trading layer, simulator, and edge attribution
+        run: pytest -q tests/test_trading.py tests/test_backtest.py tests/test_attribution.py
 
       - name: Deployment gate refuses a small sample
         # The mirror of the readiness gate above: a gate that approves a
@@ -175,6 +175,11 @@ jobs:
           assert result.ending_bankroll_usdc > result.starting_bankroll_usdc, "expected a profit"
           assert not report.conclusive, "a 10-trade run was reported as conclusive"
           assert not report.approved, "deployment gate approved a 10-trade run"
+          d = report.decomposition
+          assert d is not None and d.reconciles(report.metrics.net_pnl_usdc), (
+              "edge decomposition does not reconcile to the ledger"
+          )
+          assert d.spread_cost_usdc >= 0.0, "crossing the spread reported as a benefit"
           print("deployment gate correctly refuses:", len(report.failures), "failed checks")
           PY
 

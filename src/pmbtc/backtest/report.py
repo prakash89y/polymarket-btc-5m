@@ -25,6 +25,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
+from pmbtc.backtest.attribution import EdgeDecomposition, decompose
 from pmbtc.backtest.engine import BacktestResult
 from pmbtc.backtest.metrics import BacktestMetrics, compute_metrics
 from pmbtc.config import Config
@@ -54,6 +55,7 @@ class BacktestReport:
     metrics: BacktestMetrics
     checks: list[GateCheck] = field(default_factory=list)
     tests: list[TestResult] = field(default_factory=list)
+    decomposition: EdgeDecomposition | None = None
     model_name: str = ""
     decision_horizon_seconds: int = 0
     fill_style: str = "touch"
@@ -95,18 +97,39 @@ class BacktestReport:
             "metrics": self.metrics.as_dict(),
             "checks": [check.as_dict() for check in self.checks],
             "tests": [test.as_dict() for test in self.tests],
+            "decomposition": self.decomposition.as_dict() if self.decomposition else None,
         }
 
     def render(self) -> str:
-        lines = [self.summary(), str(self.metrics), ""]
+        m = self.metrics
+        lines = [self.summary(), str(m), ""]
         lines += [str(check) for check in self.checks]
         if self.tests:
             lines += ["", *[str(test) for test in self.tests]]
-        if self.metrics.skips:
-            lines += ["", "abstentions:"]
+
+        if self.decomposition is not None and self.decomposition.intents:
+            lines += ["", self.decomposition.render()]
+
+        if m.trades:
             lines += [
-                f"  {reason}: {count}" for reason, count in self.metrics.skips.items()
+                "",
+                "execution quality:",
+                f"  fill rate            {m.fill_rate:.1%} "
+                f"({m.trades}/{m.fill_attempts} attempts, {m.partial_fills} partial)",
+                f"  avg holding time     {m.avg_holding_seconds:.0f}s",
+                f"  avg quoted spread    {m.avg_quoted_spread:.4f}",
+                f"  avg spread paid      {m.avg_spread_paid:.4f} per share",
+                f"  avg slippage         {m.avg_slippage:.4f} per share",
+                f"  trade frequency      {m.trades_per_day:.2f}/day "
+                f"({m.trade_rate:.1%} of windows)",
             ]
+
+        if m.reliability is not None and m.reliability.samples:
+            lines += ["", "reliability (model):", m.reliability.render()]
+
+        if m.skips:
+            lines += ["", "abstentions:"]
+            lines += [f"  {reason}: {count}" for reason, count in m.skips.items()]
         return "\n".join(lines)
 
 
@@ -128,6 +151,7 @@ def evaluate_backtest(
 
     report = BacktestReport(
         metrics=metrics,
+        decomposition=decompose(result, config.costs),
         model_name=result.model_name,
         decision_horizon_seconds=result.decision_horizon_seconds,
         fill_style=result.fill_style,
@@ -200,6 +224,38 @@ def evaluate_backtest(
             f"(skill {metrics.brier_skill:+.4f})",
         )
     )
+
+    # --- 3b. Positive expected value *after* execution costs ------------- #
+    # The condition the brief for this module exists to enforce: a better Brier
+    # score is not a reason to deploy. The decomposition's net line is the raw
+    # forecast edge minus spread, slippage, fees, risk limits and missed fills,
+    # so requiring it to be positive is requiring the strategy to survive its
+    # own execution rather than merely to forecast well.
+    decomposition = report.decomposition
+    if decomposition is not None and decomposition.intents:
+        add(
+            GateCheck(
+                "positive_ev_after_costs",
+                decomposition.net_profit_usdc > 0.0 and metrics.return_on_stake > 0.0,
+                f"net {decomposition.net_profit_usdc:+.2f} USDC from raw edge "
+                f"{decomposition.raw_edge_usdc:+.2f}; return on stake "
+                f"{metrics.return_on_stake:+.2%}",
+            )
+        )
+        add(
+            GateCheck(
+                "decomposition_reconciles",
+                decomposition.reconciles(metrics.net_pnl_usdc),
+                f"walked P&L vs ledger differs by "
+                f"{decomposition.reconciliation_error_usdc:+.2e} USDC",
+            )
+        )
+    else:
+        add(
+            GateCheck(
+                "positive_ev_after_costs", False, "no intent produced a priced trade"
+            )
+        )
 
     # --- 4. Did it beat break-even by more than luck? -------------------- #
     if metrics.trades > 0:

@@ -12,6 +12,81 @@ one that does not.
 
 ---
 
+## [0.10.0] — 2026-08-01 — Edge decomposition, strict walk-forward, EV gate
+
+Module 8 completed to its full brief. v0.9.0 built the probability-to-money
+pipeline; this release makes it *explain itself*, and adds the two gates that
+stop a good forecast being mistaken for a good strategy.
+
+### Added
+
+**Edge decomposition (`backtest/attribution.py`).** A waterfall from the raw
+forecast edge to realised P&L, built as six counterfactual worlds applied in
+runtime order — mid → spread → slippage → fees → risk limits → fill
+constraints. Because each line is the difference of two adjacent worlds, the
+identity
+
+    raw_edge - spread - slippage - fees - risk - missed_fills == net_profit
+
+holds exactly rather than approximately, and is asserted against the engine's
+own bankroll on every run. Cost lines may be negative: risk limits that block a
+losing trade *save* money, and reporting only the cases where a constraint hurt
+would make the risk engine look like pure overhead.
+
+**Strict walk-forward (`run_strict_walk_forward`).** Refits the model at every
+fold and only ever trades forward. Splitting is delegated to
+`models.validation.TimeSeriesSplitter` rather than reimplemented — it already
+groups by market and purges the adjacent windows, and adjacent 5-minute markets
+share microstructure state. Bankroll resets each fold, so one lucky early fold
+cannot inflate the size of every later trade.
+
+**The gates the brief exists to enforce.** `positive_ev_after_costs` requires
+net profit *and* positive return on stake after execution; a better Brier score
+is explicitly not a reason to deploy. `decomposition_reconciles` verifies the
+attribution against the ledger, so a broken decomposition fails loudly rather
+than mis-attributing quietly.
+
+**Metrics completed.** Calibration, reliability (ECE/MCE + the diagram), fill
+rate, average holding time, average quoted spread, average spread paid, average
+slippage, and trade frequency. `--strict` and `--folds` added to `pmbtc backtest`.
+
+**Latency (`costs.assumed_latency_ms`, default 500ms).** The book must still be
+fresh when the order *lands*, not when we looked at it. **Confidence shrinkage
+(`prediction.confidence_shrinkage`, default 0.0)** pulls probabilities toward
+0.5 in proportion to recent calibration error.
+
+### Fixed
+
+**A real bug, found by the decomposition on live data.** The fair (spread-free)
+reference price was recorded as the **UP** mid regardless of which side was
+bought. A DOWN token is the complement, so its fair price is `1 - mid_up`, and
+against the wrong reference the ladder reported *crossing the spread as a
++146 USDC profit*. Spread cost is now non-negative in both directions and the
+regression test asserts it across UP/DOWN, winning/losing and skewed books. The
+bound is `>= 0` rather than `> 0` deliberately: a losing trade forfeits its
+stake whatever it paid, so entry price only moves the winning branch.
+
+**A duplication introduced in v0.9.0.** `backtest/metrics.py` had defined its own
+`_brier`, `_log_loss` and `_accuracy`, duplicating `models/calibration.py` —
+which the promotion gate uses. Two implementations would eventually disagree,
+and a model would pass one gate and fail the other for no visible reason.
+Deleted in favour of `calibration.evaluate()`, which also supplied the required
+reliability curve for free.
+
+### Notes
+Schemas are unchanged — feature, dataset, settlement and model. The two new
+config fields are additive with behaviour-preserving defaults.
+
+Measured on the collected data (77 labelled markets), strict walk-forward over 4
+folds: pooled ROI -1.45% on 15 trades, 1 of 4 folds profitable, INCONCLUSIVE as
+expected below `min_trades`. The decomposition is the interesting part — raw
+forecast edge **+239.65 USDC**, of which spread took 21.86 and slippage 20.09,
+and the risk engine's 16 refusals cost 212.23, netting -14.53. The forecast had
+edge; the execution and the limits ate it. That sentence was not available
+before this release.
+
+---
+
 ## [0.9.0] — 2026-08-01 — Module 8: the trading layer and the backtest
 
 The first module that measures money. Everything before it scores *forecasts* —
