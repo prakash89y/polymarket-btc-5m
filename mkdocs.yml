@@ -1,0 +1,44 @@
+site_name: pmbtc
+site_description: Autonomous trading system for Polymarket Bitcoin 5-minute Up/Down markets
+docs_dir: docs
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/weather-sunny, name: Light mode}
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          # The feature dependency graph is rendered as Mermaid, so it needs to
+          # survive the code-fence processor untouched.
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Engineering workflow: GITHUB_WORKFLOW.md
+  - Architecture: ARCHITECTURE.md
+  - Operations: OPERATIONS.md
+  - Deployment: DEPLOYMENT.md
+  - Reference:
+      - Features: features.md
+      - Schemas: SCHEMAS.md
+      - Modules: MODULES.md
+      - API: API.md
+
+strict: true
