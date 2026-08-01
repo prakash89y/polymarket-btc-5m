@@ -54,6 +54,22 @@ _LINK_REWRITES: dict[str, str] = {
 _MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 
 
+def write_lf(path: Path, text: str) -> Path:
+    """Write with explicit LF endings.
+
+    ``Path.write_text`` translates ``\\n`` to ``\\r\\n`` on Windows, so the same
+    generator would emit different bytes on a Windows workstation than on a
+    Linux CI runner. The docs workflow compares a fresh generation against the
+    committed copy, so that difference reads as spurious drift — and in a
+    project whose central claim is determinism, "it depends on the platform" is
+    not an acceptable answer anywhere.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    return path
+
+
 def rewrite_links(text: str) -> str:
     """Point markdown links at their location inside the flattened docs tree."""
 
@@ -85,9 +101,10 @@ def mirror_root_documents() -> list[Path]:
             f"<!-- Generated from {source_name} by scripts/generate_docs.py. "
             "Edit the source, not this copy. -->\n\n"
         )
-        target = DOCS / target_name
-        target.write_text(banner + rewrite_links(source.read_text(encoding="utf-8")),
-                          encoding="utf-8")
+        target = write_lf(
+            DOCS / target_name,
+            banner + rewrite_links(source.read_text(encoding="utf-8")),
+        )
         written.append(target)
     return written
 
@@ -164,9 +181,7 @@ def generate_schema_docs() -> Path:
         "`scripts/validate_schemas.py`.",
         "",
     ]
-    path = DOCS / "SCHEMAS.md"
-    path.write_text("\n".join(lines), encoding="utf-8")
-    return path
+    return write_lf(DOCS / "SCHEMAS.md", "\n".join(lines))
 
 
 def generate_module_docs() -> Path:
@@ -208,9 +223,7 @@ def generate_module_docs() -> Path:
                 lines.append(f"| `{sub}` | {summary} |")
             lines.append("")
     del pmbtc
-    path = DOCS / "MODULES.md"
-    path.write_text("\n".join(lines), encoding="utf-8")
-    return path
+    return write_lf(DOCS / "MODULES.md", "\n".join(lines))
 
 
 def generate_api_docs() -> Path:
@@ -239,9 +252,7 @@ def generate_api_docs() -> Path:
             )
             lines.append(f"- **`{export}`** *({kind})* — {doc}")
         lines.append("")
-    path = DOCS / "API.md"
-    path.write_text("\n".join(lines), encoding="utf-8")
-    return path
+    return write_lf(DOCS / "API.md", "\n".join(lines))
 
 
 def generate_index() -> Path:
@@ -276,9 +287,7 @@ def generate_index() -> Path:
         "- [Branch protection](BRANCH_PROTECTION.md)",
         "",
     ]
-    path = DOCS / "index.md"
-    path.write_text("\n".join(lines), encoding="utf-8")
-    return path
+    return write_lf(DOCS / "index.md", "\n".join(lines))
 
 
 def main() -> int:

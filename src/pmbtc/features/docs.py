@@ -99,5 +99,8 @@ def generate_markdown(graph: FeatureGraph) -> str:
 
 def write_docs(graph: FeatureGraph, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(generate_markdown(graph), encoding="utf-8")
+    # Explicit LF: the same generator must emit identical bytes on Windows
+    # and on a Linux CI runner, or the staleness check reports false drift.
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(generate_markdown(graph))
     return path
