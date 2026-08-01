@@ -22,10 +22,15 @@ from pmbtc.features.graph import build_graph
 from pmbtc.features.matrix import MatrixBuilder, feature_set_version
 from pmbtc.live.archive import TickArchive
 from pmbtc.live.clob import PolymarketMarketFeed
+from pmbtc.live.fixtures import in_continuous_integration, resolve_clob_archive
 from pmbtc.logging_setup import configure_logging
 
 console = Console()
 FAILURES: list[str] = []
+
+#: `--require-live` makes this the local production check: the committed
+#: fixture is refused and a real collector archive must exist. CI never sets it.
+REQUIRE_LIVE = "--require-live" in sys.argv
 
 
 def check(name: str, passed: bool, detail: str = "") -> bool:
@@ -40,6 +45,11 @@ def main() -> int:
     config = load_config()
     configure_logging(config)
     graph = build_graph(all_features())
+
+    mode = "production (live archive required)" if REQUIRE_LIVE else (
+        "CI (committed fixture)" if in_continuous_integration() else "local"
+    )
+    console.print(f"[dim]validation mode: {mode}[/]")
 
     console.rule("[bold]1. Feature declarations")
     check("families are independent modules", len(FAMILIES) == 10,
@@ -88,11 +98,20 @@ def main() -> int:
           f"{len(partial.recomputed)} of {len(engine.feature_names)} recomputed")
 
     console.rule("[bold]5. Reproducible from archive, no live services")
-    archive = TickArchive(config.resolved_path(config.feeds.archive_dir), enabled=False)
-    clob_files = [f for f in archive.files() if "clob" in f.name]
+    # Determinism is a property of the code, so it is verified against whichever
+    # archive is available: a live one locally, the committed fixture on a clean
+    # runner. The assertions are identical either way; only the source differs,
+    # and it is always reported. `--require-live` refuses the fixture, which is
+    # the local production check that the collector really is emitting
+    # replayable output.
+    resolved = resolve_clob_archive(config, require_live=REQUIRE_LIVE)
+    console.print(f"       archive source: {resolved.describe()}")
+    archive = TickArchive(resolved.root, enabled=False)
+    clob_files = list(resolved.files)
     if not clob_files:
-        check("archived frames available", False, "no CLOB archive found")
+        check("archived frames available", False, resolved.reason)
     else:
+        check("archive source resolved", True, resolved.source.value)
         frames = archive.read_frames(clob_files[-1])
         tokens: list[str] = []
         for _, payload in frames:
