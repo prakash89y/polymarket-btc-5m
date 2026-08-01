@@ -10,8 +10,49 @@ one that does not.
 
 ## [Unreleased]
 
+---
+
+## [0.8.0] — 2026-08-01 — Engineering Workflow
+
+**Schemas:** feature `ade558d616b58821` · dataset `4.0` · settlement `2.0` · model `1.1`
+
+No change to trading logic, the feature pipeline, or the models. This release is
+about making the previous seven reproducible and hard to regress.
+
 ### Added
-- GitHub engineering workflow: branch strategy, CI, security policy, templates.
+- Git repository with a documented branch strategy (`main`, `develop`,
+  `feature/*`, `release/*`, `hotfix/*`) and branch-protection rules recorded as
+  a reviewable document rather than only in a web UI.
+- CI on every push and pull request: ruff, mypy, unit and integration tests on
+  Python 3.12 and 3.13, replay determinism, feature/dataset/model schema
+  validation, readiness validation, Gitleaks across full history, and
+  `pip-audit --strict`. A single aggregate `CI complete` check gates merges, so
+  a job can never be silently dropped from the required set.
+- **Experiment tracking**: every model card now records the commit, branch, tag,
+  and working-tree cleanliness it was trained from, and the commit is part of
+  the experiment identity hash. A model trained from a dirty tree is marked
+  unreproducible rather than quietly accepted.
+- Tag-driven release workflow that re-runs every gate before publishing, since a
+  tag can be pushed to any commit.
+- Generated documentation — features, schemas, modules, API — built from the
+  code, with CI failing if the committed copy is stale. Architecture,
+  operations, and deployment guides. MkDocs site for GitHub Pages.
+- Security policy, Dependabot with numerically-sensitive packages held for
+  manual review, CODEOWNERS, issue and pull-request templates.
+- `scripts/validate_repo_hygiene.py`, `validate_schemas.py`, `validate_github.py`.
+
+### Changed
+- `ModelCard` gained four git provenance fields (**model schema 1.0 → 1.1**).
+- New `models` and `explain` extras so CI can install scikit-learn without
+  pulling the ~3 GB deep-learning stack.
+
+### Notes
+- **Git LFS deliberately not enabled.** Frame archives grow ~95 GB/year and LFS
+  never garbage-collects; the archives are reproducible by re-collection and
+  pinned by a 24 KB committed baseline. Reasoning recorded in
+  `docs/GITHUB_WORKFLOW.md`.
+- `ruff format` is **not** enforced. Adopting it means one reformat commit across
+  ~60 files — a deliberate decision, not a side effect of adding CI.
 
 ---
 
@@ -134,7 +175,8 @@ one that does not.
   redaction, UTC window arithmetic, typed errors, Docker, test suite.
 - Live trading triple-gated and off by default.
 
-[Unreleased]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.4.0...v0.5.0
