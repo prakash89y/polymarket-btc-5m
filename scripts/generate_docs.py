@@ -196,7 +196,8 @@ def generate_module_docs() -> Path:
     ]
     packages = [
         "pmbtc.settlement", "pmbtc.gamma", "pmbtc.dataset",
-        "pmbtc.live", "pmbtc.features", "pmbtc.models", "pmbtc.ops",
+        "pmbtc.live", "pmbtc.features", "pmbtc.models", "pmbtc.trading",
+        "pmbtc.backtest", "pmbtc.ops",
     ]
     for name in packages:
         try:
@@ -235,7 +236,8 @@ def generate_api_docs() -> Path:
         "",
     ]
     for name in ("pmbtc.settlement", "pmbtc.gamma", "pmbtc.dataset",
-                 "pmbtc.live", "pmbtc.features", "pmbtc.models", "pmbtc.ops"):
+                 "pmbtc.live", "pmbtc.features", "pmbtc.models",
+                 "pmbtc.trading", "pmbtc.backtest", "pmbtc.ops"):
         try:
             module = importlib.import_module(name)
         except ImportError:

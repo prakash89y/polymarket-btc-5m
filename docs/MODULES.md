@@ -153,6 +153,79 @@ Module 7 (training) is deliberately gated behind both:
 | `train` | Training orchestration. |
 | `validation` | Time-aware validation. |
 
+## `pmbtc.trading`
+
+The trading layer: the path from a probability to a position.
+
+Modules 1-7 answer "what will happen". This package answers "does that belong
+in a position, at what price, and for how much" — and it is deliberately
+separate from :mod:`pmbtc.backtest`, because the same four questions have to be
+answered identically in simulation, in paper, and with real money. A cost model
+that lives inside the simulator is a cost model the live path will eventually
+re-implement, slightly differently, and the difference will only show up in the
+P&L.
+
+    Quote + model probability
+      -> DecisionEngine   gates -> trade or a named SkipReason
+      -> CostModel        entry price, fees, round-trip cost
+      -> PositionSizer    fractional Kelly, capped
+      -> RiskLedger       portfolio limits, drawdown, kill switch
+
+Nothing here touches the network, the clock, or a random number generator.
+Every function is pure in its inputs, so the same market state produces the same
+decision in a backtest as it does at 3 a.m. against the live book.
+
+| submodule | summary |
+|---|---|
+| `costs` | The cost model. |
+| `decision` | The decision gate: probability in, position or a named refusal out. |
+| `risk` | Portfolio risk limits — the layer that survives a wrong model. |
+| `sizing` | Position sizing: fractional Kelly, with the caps that matter more than Kelly. |
+
+## `pmbtc.backtest`
+
+Module 8 — backtesting: does the edge survive contact with the book?
+
+Every gate before this one scores *forecasts*. Brier score and log loss say how
+well the model knows the world; they say nothing about money. On a market where
+the spread is 1-3 cents and the whole edge is a few percentage points, the
+difference is decisive: a model can beat the market's own forecast on Brier and
+still lose on every single trade after paying to cross the spread. This module
+is the first thing in the system that measures P&L, and therefore the first
+thing that can answer whether to trade at all.
+
+    labelled rows (Module 4/6)
+      -> BacktestEngine     one decision per window, chronological
+           DecisionEngine   trade or a named SkipReason      (pmbtc.trading)
+           PositionSizer    fractional Kelly, capped         (pmbtc.trading)
+           FillModel        what the book would actually have given us
+           RiskLedger       daily/weekly/streak stand-downs  (pmbtc.trading)
+      -> BacktestMetrics    ROI, profit factor, Sharpe, drawdown, Brier
+      -> BacktestReport     the deployment gate + walk-forward stability
+
+Three properties are deliberate:
+
+*It is pessimistic by construction.* Fills cross the spread, pay slippage, and
+are capped by the depth that was actually resting. Missing depth data is treated
+as no depth, not as infinite depth.
+
+*It is deterministic.* No clock reads, no RNG, no set iteration order. The same
+dataset and config produce byte-identical results, which is what makes a
+regression in the strategy detectable rather than arguable.
+
+*It cannot conclude from noise.* A result computed on fewer than
+``backtest.min_trades`` trades is reported as inconclusive and fails the gate,
+however good the numbers look.
+
+| submodule | summary |
+|---|---|
+| `adapters` | Adapters from "a thing that predicts" to the engine's probability callable. |
+| `engine` | The simulator. |
+| `fills` | What the book would actually have given us. |
+| `metrics` | Performance metrics for a completed run. |
+| `report` | The deployment gate. |
+| `walkforward` | Walk-forward evaluation over several lookbacks. |
+
 ## `pmbtc.ops`
 
 Operations: liveness, daily reporting, and alerting.

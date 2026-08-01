@@ -20,7 +20,7 @@ begins.
 | 5 | Live market data collector | **done** |
 | 6 | Feature engineering pipeline | **done** |
 | 7 | Model training (GBDT / sequence / ensemble + calibration) | **framework done, gated** |
-| 8 | Backtesting framework | pending |
+| 8 | Trading layer + backtesting framework | **done** |
 | 9 | Paper trading engine | pending |
 | 10 | Live execution engine | pending |
 | 11 | Monitoring dashboard | pending |
@@ -113,6 +113,23 @@ be recorded at all. Each one also declares how it can be reconstructed; a
 stream-derived feature is reproducible precisely because the raw frames are
 archived as they arrive, and one that cannot be reconstructed is excluded from
 training by policy rather than by accident.
+
+**Brier score is not money.** Every gate before Module 8 scores forecasts; a
+model can beat the market's own forecast on Brier and still lose on every trade
+after paying to cross a 1-3 cent spread on a 50-cent contract. So the backtest
+prices entries at the touch plus slippage, caps fills at the depth that was
+actually resting, and treats an unknown book as no book. Break-even is the
+average price paid, not 50% — a contract bought at 0.62 has to win 62% of the
+time to return the stake. And a result on fewer than `backtest.min_trades`
+trades is reported as **inconclusive** and fails the gate however good it looks,
+because ten lucky trades is not evidence.
+
+**The cost model is written once.** `pmbtc.trading` holds the whole path from a
+probability to a position — decision gates, cost model, sizing, risk ledger —
+and the backtest, the paper engine, and live execution all drive that same code.
+A cost model that lived inside the simulator would be re-implemented, slightly
+differently, by the live path, and the difference would only ever show up in the
+P&L.
 
 **No model ships without beating the benchmarks.** Random, market-favourite,
 market-underdog, logistic, and gradient boosting — scored on Brier and log loss,
@@ -208,9 +225,21 @@ src/pmbtc/live/           live market data (Module 5)
   service.py              continuous long-running collection
 src/pmbtc/features/       feature registry: tiers, provenance, reproducibility
 src/pmbtc/models/         readiness gate + benchmark baselines
+src/pmbtc/trading/        probability -> position (Module 8, shared with 9/10)
+  costs.py                one cost model: spread, slippage, fees, payoff
+  decision.py             the abstention gates; every refusal is named
+  sizing.py               fractional Kelly, capped well below it
+  risk.py                 daily/weekly loss, streaks, exposure, kill switch
+src/pmbtc/backtest/       the simulator (Module 8)
+  engine.py               chronological replay; the label only settles
+  fills.py                touch/mid/aggressive, depth-capped, pessimistic
+  metrics.py              ROI, profit factor, Sharpe, drawdown, Brier
+  report.py               the deployment gate
+  walkforward.py          every configured lookback must pass
+  adapters.py             any estimator -> a probability callable
 src/pmbtc/clock.py        UTC sync, drift detection, pre-settlement safety gate
 src/pmbtc/metrics.py      counters/gauges/histograms + Prometheus rendering
-src/pmbtc/cli.py          `doctor` / `verify-settlement` / `discover` / `replay`
+src/pmbtc/cli.py          `doctor` / `discover` / `train` / `backtest` / ...
 tests/fixtures/gamma/     real archived Gamma payloads (2 providers, 3 eras)
 tests/fixtures/archive/   captured responses for the replay regression test
 data/                     local history, parquet, sqlite, KILL_SWITCH

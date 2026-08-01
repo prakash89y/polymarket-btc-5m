@@ -719,6 +719,121 @@ def train(
 
 
 @app.command()
+def backtest(
+    config: ConfigOption = None,
+    model: Annotated[
+        str, typer.Option("--model", help="market | logistic | gradient_boosting")
+    ] = "logistic",
+    train_fraction: Annotated[
+        float, typer.Option("--train-fraction", help="Chronological share used to fit.")
+    ] = 0.6,
+    horizon: Annotated[
+        int | None,
+        typer.Option("--horizon", help="Decision horizon in seconds (default: latest allowed)."),
+    ] = None,
+    fill: Annotated[
+        str, typer.Option("--fill", help="touch | mid | aggressive")
+    ] = "touch",
+    walk_forward: Annotated[
+        bool, typer.Option("--walk-forward", help="Gate every configured lookback.")
+    ] = False,
+) -> None:
+    """Simulate the strategy over settled windows and apply the deployment gate.
+
+    The split is chronological and on a market boundary, so no market ever
+    appears in both the fit and the evaluation. ``--model market`` is the null
+    control: it forecasts what the book forecasts, so it should place no trades.
+    """
+    import numpy as np
+
+    from pmbtc.backtest import (
+        BacktestEngine,
+        EstimatorModel,
+        FillModel,
+        MarketProbabilityModel,
+        ProbabilityModel,
+        evaluate_backtest,
+        run_walk_forward,
+    )
+    from pmbtc.dataset import build_rows, open_dataset_store
+    from pmbtc.models.baselines import GradientBoostingBaseline, LogisticBaseline
+    from pmbtc.trading.costs import CostModel
+
+    cfg = _load(config)
+    configure_logging(cfg)
+    store = open_dataset_store(cfg)
+    rows, _ = build_rows({m.condition_id: m for m in store.markets()}, store.snapshots())
+    if not rows:
+        console.print("[yellow]No labelled rows to backtest.[/]")
+        raise typer.Exit(code=1)
+
+    # Split on a market boundary: a market whose T-240 row trained the model
+    # must not have its T-60 row evaluated by it.
+    market_order = list(dict.fromkeys(r["condition_id"] for r in rows))
+    cut = max(1, int(len(market_order) * train_fraction))
+    train_ids = set(market_order[:cut])
+    train_rows = [r for r in rows if r["condition_id"] in train_ids]
+    test_rows = [r for r in rows if r["condition_id"] not in train_ids]
+    if not test_rows:
+        console.print("[yellow]Nothing left to evaluate after the split.[/]")
+        raise typer.Exit(code=1)
+
+    strategy: ProbabilityModel
+    if model == "market":
+        strategy = MarketProbabilityModel()
+    else:
+        columns = sorted({k for r in rows for k in r if k.startswith("f_")})
+        x = np.array([[_num(r.get(c)) for c in columns] for r in train_rows], dtype=float)
+        y = np.array([r["label"] for r in train_rows], dtype=int)
+        if len(set(y.tolist())) < 2:
+            console.print("[yellow]Training slice has only one class — cannot fit.[/]")
+            raise typer.Exit(code=1)
+        seed = cfg.model.random_seed
+        estimator = (
+            GradientBoostingBaseline(seed)
+            if model == "gradient_boosting"
+            else LogisticBaseline(seed)
+        )
+        estimator.fit(x, y)
+        strategy = EstimatorModel(estimator, columns, name=model)
+
+    engine = BacktestEngine(
+        cfg,
+        fill_model=FillModel(
+            CostModel(cfg.costs), style=fill, pessimistic=cfg.backtest.pessimistic_fill  # type: ignore[arg-type]
+        ),
+    )
+    console.print(
+        f"markets: train={len(train_ids)} test={len(market_order) - len(train_ids)} "
+        f"| rows: train={len(train_rows)} test={len(test_rows)} | fill={fill}"
+    )
+
+    if walk_forward:
+        wf = run_walk_forward(
+            cfg, test_rows, strategy, engine=engine, model_name=model,
+            decision_horizon_seconds=horizon,
+        )
+        console.print(wf.render())
+        payload: dict[str, object] = wf.as_dict()
+        approved = wf.approved
+    else:
+        result = engine.run(
+            test_rows, strategy, model_name=model, decision_horizon_seconds=horizon
+        )
+        report = evaluate_backtest(cfg, result)
+        console.print(report.render())
+        payload = report.as_dict()
+        approved = report.approved
+
+    out = cfg.resolved_path(cfg.app.artifact_dir) / "reports" / f"backtest-{model}-{fill}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    console.print(f"\nreport: {out}")
+    if not approved:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def paths(config: ConfigOption = None) -> None:
     """Create and list the runtime directories."""
     cfg = _load(config)
