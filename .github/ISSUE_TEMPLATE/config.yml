@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/prakash89y/polymarket-btc-5m/security/advisories/new
+    about: Report privately. Never in a public issue.
+  - name: Engineering workflow
+    url: https://github.com/prakash89y/polymarket-btc-5m/blob/main/docs/GITHUB_WORKFLOW.md
+    about: Branching, versioning, and the validation gates.

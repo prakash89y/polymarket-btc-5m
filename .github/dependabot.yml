@@ -1,0 +1,57 @@
+version: 2
+
+updates:
+  # Python dependencies. Weekly rather than daily: this repo trades money, and
+  # a stream of dependency PRs trains reviewers to merge without reading.
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    target-branch: develop
+    labels: [dependencies, security]
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+    groups:
+      # One PR for the routine tooling churn, so it can be reviewed as a unit.
+      dev-tooling:
+        patterns: ["ruff", "mypy", "pytest*", "types-*", "freezegun"]
+        update-types: [minor, patch]
+      # Scientific stack moves together; a partial upgrade is worse than none.
+      scientific:
+        patterns: ["numpy", "pandas", "pyarrow", "scikit-learn", "scipy"]
+        update-types: [minor, patch]
+    ignore:
+      # Major bumps of anything that can change numerical output are reviewed
+      # by hand: they can move a feature value, and a moved feature invalidates
+      # every stored row without any test necessarily failing.
+      - dependency-name: numpy
+        update-types: [version-update:semver-major]
+      - dependency-name: scikit-learn
+        update-types: [version-update:semver-major]
+      - dependency-name: pyarrow
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    target-branch: develop
+    labels: [dependencies, ci]
+    commit-message:
+      prefix: "chore(ci)"
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    target-branch: develop
+    labels: [dependencies, docker]
+    commit-message:
+      prefix: "chore(docker)"

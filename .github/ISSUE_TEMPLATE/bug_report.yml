@@ -1,0 +1,69 @@
+name: Bug report
+description: Something behaves incorrectly
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If this is a **security** issue — anything touching credentials, the
+        signing key, or a safety gate — do not file it here. See
+        [SECURITY.md](../blob/main/SECURITY.md) for private reporting.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Observed behaviour, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: |
+        Exact commands. If it involves collected data, include the market slug
+        and settlement timestamp — those pin the exact window.
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - settlement verification
+        - market discovery (Gamma)
+        - dataset / collection
+        - live feeds
+        - feature pipeline
+        - model training / promotion
+        - ops (alerts, heartbeat, summary)
+        - other
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `pmbtc version` and `python scripts/validate_schemas.py`
+      placeholder: "pmbtc 0.1.0, feature schema ade558d616b58821"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant log lines. Secrets are redacted automatically, but check
+        before pasting.
+      render: text
+
+  - type: checkboxes
+    id: data-integrity
+    attributes:
+      label: Data integrity
+      options:
+        - label: This may have produced incorrect stored data (leakage, wrong labels, wrong settlement source)
+        - label: I have run `pmbtc audit` and attached the result

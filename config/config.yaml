@@ -1,0 +1,429 @@
+# pmbtc — Polymarket BTC 5-minute Up/Down bot
+#
+# Precedence: environment (PMBTC_*) > this file > code defaults.
+# Nested overrides use a double underscore, e.g.
+#   PMBTC_PREDICTION__MIN_EDGE=0.06
+#   PMBTC_APP__MODE=backtest
+#
+# Secrets never belong in this file. See .env.example.
+# Values with ${VAR} / ${VAR:-default} are interpolated from the environment.
+
+app:
+  name: pmbtc
+  mode: paper                 # backtest | paper | live
+  asset: BTC
+  window_seconds: 300
+  warmup_bars: 1000
+  base_dir: .
+  data_dir: data
+  log_dir: logs
+  artifact_dir: artifacts
+
+logging:
+  level: INFO
+  json_logs: false            # true inside Docker
+  file_enabled: true
+  file_name: pmbtc.log
+  rotate_mb: 64
+  backup_count: 14
+  decision_log_name: decisions.jsonl   # never rotated: this is the training set
+
+http:
+  connect_timeout_s: 5.0
+  read_timeout_s: 15.0
+  total_timeout_s: 30.0
+  max_retries: 4
+  backoff_base_s: 0.5
+  backoff_max_s: 30.0
+  max_clock_skew_ms: 2000
+
+polymarket:
+  gamma_base_url: https://gamma-api.polymarket.com
+  clob_base_url: https://clob.polymarket.com
+  data_api_base_url: https://data-api.polymarket.com
+  ws_base_url: wss://ws-subscriptions-clob.polymarket.com/ws
+  chain_id: 137
+  # Structured family identity (events[].series[].slug) -- the primary key.
+  series_slug: btc-up-or-down-5m
+  # Real slug shape, verified live 2026-07-31: btc-updown-5m-<window_open_epoch>.
+  market_slug_patterns:
+    - btc-updown-5m-
+  tick_size: 0.01            # fallback only; real value is per-market
+  min_order_usdc: 5.0        # observed orderMinSize on live BTC 5m markets
+  max_order_usdc: 500.0
+  taker_fee_bps: 0.0
+  maker_fee_bps: 0.0
+  market_cache_seconds: 60
+
+# ---------------------------------------------------------------------------
+# Settlement: the immutable core. A market whose resolution source cannot be
+# pinned with certainty is skipped, never traded. These gates are enforced in
+# code -- require_verified/allow_unknown_source cannot be relaxed outside
+# backtest mode, whatever this file says.
+# ---------------------------------------------------------------------------
+settlement:
+  # Verified against live Gamma payloads on 2026-07-31: the BTC 5m and 15m
+  # Up/Down families resolve off the Chainlink BTC/USD data stream. The sibling
+  # btc-up-or-down-hourly family resolves off Binance BTCUSDT -- which is
+  # exactly the mistake this engine exists to prevent.
+  expected_source: chainlink         # chainlink | binance_spot | pyth | coinbase_spot
+  require_verified: true
+  allow_unknown_source: false
+  reverify_each_window: true
+  min_detection_confidence: 1.0
+  resolution_timeout_s: 180
+  price_cross_check_bps: 2.0
+  providers:
+    chainlink:
+      enabled: true
+      base_url: https://data.chain.link/streams/btc-usd
+      symbol: BTC/USD
+      feed_id: btc-usd
+      max_lag_ms: 1500
+    binance_spot:
+      enabled: true
+      base_url: https://api.binance.com
+      symbol: BTCUSDT
+      feed_id: BTCUSDT
+      max_lag_ms: 1500
+    pyth:
+      enabled: false
+      base_url: https://hermes.pyth.network
+      feed_id: ""
+    coinbase_spot:
+      enabled: false
+      base_url: https://api.exchange.coinbase.com
+      symbol: BTC-USD
+
+# ---------------------------------------------------------------------------
+# Clock: a 1-second error is 0.33% of a 300s instrument, applied to every label
+# and every entry. Measured on the dev machine while building Module 3: the
+# local clock was ~1.3s behind Binance server time. Fails closed.
+# ---------------------------------------------------------------------------
+clock:
+  sources: [clob, binance]
+  sync_interval_seconds: 60
+  max_drift_ms: 1500
+  max_sample_rtt_ms: 2000
+  max_uncertainty_ms: 750
+  min_samples: 1
+  stale_sync_seconds: 300
+  order_safety_window_seconds: 20   # hard no-submit zone before settlement
+
+# Discovery is series-driven; no slug is ever constructed on the happy path.
+gamma:
+  discovery_poll_seconds: 30
+  lookahead_windows: 3
+  page_limit: 50
+  max_markets_per_scan: 25
+  allow_slug_fallback: true
+  archive_responses: true           # required for replay regression testing
+  archive_dir: data/raw/gamma
+  keep_rejected_payloads: 50
+
+schema_check:
+  strict: true                      # a changed required field halts parsing
+  alert_on_new_fields: true         # additive changes alert but do not halt
+  registry_file: data/gamma_schema.json
+
+# ---------------------------------------------------------------------------
+# Live feeds: the PRIMARY microstructure source. Verified 2026-07-31: the CLOB
+# socket delivered 3,891 frames in 25s for one market, against Gamma quotes
+# measured 29-72s stale. Gamma is discovery/metadata/settlement only.
+# ---------------------------------------------------------------------------
+feeds:
+  clob_enabled: true
+  binance_enabled: true
+  clob_staleness_budget_ms: 15000     # silence past this = dead feed
+  binance_staleness_budget_ms: 10000
+  reconnect_backoff_base_s: 0.5
+  reconnect_backoff_max_s: 30.0
+  warmup_seconds: 90                  # subscribe before the window opens
+  cooldown_seconds: 30
+  # Archiving is what makes stream-derived features reproducible. Disabling it
+  # makes every live feature untrainable by policy.
+  archive_ticks: true
+  archive_dir: data/raw/ticks
+  archive_buffer_frames: 200
+  max_concurrent_markets: 4
+
+# Long-running collection. The dataset is the asset; it keeps growing while
+# later modules are built.
+service:
+  status_interval_seconds: 300
+  heartbeat_interval_seconds: 15    # liveness; separate from the human log tick
+  restart_on_error: true
+  max_consecutive_errors: 10
+  restart_backoff_s: 5.0
+  label_backfill_seconds: 300
+
+# ---------------------------------------------------------------------------
+# Historical dataset. Integrity over throughput: a missing snapshot is always
+# preferable to one that misrepresents when its information was known.
+# ---------------------------------------------------------------------------
+dataset:
+  root_dir: data/dataset
+  export_dir: data/exports
+  # Denser sampling near settlement, where fair value moves fastest. Any of
+  # these can serve as the training horizon.
+  snapshot_horizons_s: [300, 240, 180, 120, 60, 30, 15, 10, 5, 2, 1]
+  max_snapshot_jitter_ms: 1500     # later than this -> skipped, never backdated
+  observation_tolerance_ms: 500    # leakage guard slop, for timer jitter only
+  resolution_max_wait_s: 86400
+  resolution_poll_seconds: 60
+  min_snapshot_quality: 0.5
+  min_coverage: 0.6
+  default_format: parquet
+  dataset_version: 0.1.0
+
+health:
+  require_accepting_orders: true
+  require_order_book: true
+  min_liquidity_usdc: 100.0
+  require_two_sided_quote: true
+  max_spread: 0.10
+  max_boundary_skew_ms: 0
+  reject_past_settlement: true
+  depth_levels: 10
+
+# Market-data venues. These never execute orders -- they feed features. Each
+# entry is written in full because a section given in YAML replaces the code
+# default wholesale rather than merging into it.
+venues:
+  binance_futures:
+    enabled: true
+    rest_base_url: https://fapi.binance.com
+    ws_base_url: wss://fstream.binance.com
+    symbol: BTCUSDT
+    book_depth: 20
+  binance_spot:
+    enabled: true
+    rest_base_url: https://api.binance.com
+    ws_base_url: wss://stream.binance.com:9443
+    symbol: BTCUSDT
+    book_depth: 20
+  coinbase:
+    enabled: true
+    rest_base_url: https://api.exchange.coinbase.com
+    ws_base_url: wss://advanced-trade-ws.coinbase.com
+    symbol: BTC-USD
+  bybit:
+    enabled: true
+    rest_base_url: https://api.bybit.com
+    ws_base_url: wss://stream.bybit.com/v5/public/linear
+    symbol: BTCUSDT
+  hyperliquid:
+    enabled: false
+    rest_base_url: https://api.hyperliquid.xyz
+    ws_base_url: wss://api.hyperliquid.xyz/ws
+    symbol: BTC
+
+# Regime-tier sources. An enabled source whose key is missing is skipped at
+# runtime with a warning rather than crashing the bot.
+sources:
+  coinglass:
+    enabled: false
+    base_url: https://open-api-v4.coinglass.com
+    poll_seconds: 60
+  glassnode:
+    enabled: false
+    base_url: https://api.glassnode.com
+    poll_seconds: 3600
+    max_staleness_seconds: 86400
+  cryptoquant:
+    enabled: false
+    base_url: https://api.cryptoquant.com
+    poll_seconds: 3600
+    max_staleness_seconds: 86400
+  fear_greed:
+    enabled: true
+    base_url: https://api.alternative.me
+    poll_seconds: 3600
+    max_staleness_seconds: 172800
+  etf_flows:
+    enabled: false
+    poll_seconds: 21600
+    max_staleness_seconds: 172800
+  stablecoin_flows:
+    enabled: false
+    poll_seconds: 3600
+    max_staleness_seconds: 86400
+  macro_calendar:
+    enabled: false
+    poll_seconds: 1800
+    max_staleness_seconds: 86400
+  news:
+    enabled: false
+    poll_seconds: 300
+    max_staleness_seconds: 3600
+  twitter:
+    enabled: false
+    poll_seconds: 300
+    max_staleness_seconds: 3600
+  tradingview:
+    enabled: false
+    poll_seconds: 300
+  whale_alerts:
+    enabled: false
+    poll_seconds: 120
+    max_staleness_seconds: 3600
+
+storage:
+  db_url: ${PMBTC_DB_URL:-sqlite+aiosqlite:///data/pmbtc.db}
+  parquet_dir: data/parquet
+  raw_capture_enabled: true
+  raw_dir: data/raw
+  raw_retention_days: 90
+
+features:
+  bar_intervals: ["1s", "5s", "15s", "1m", "5m"]
+  higher_timeframes: ["15m", "1h", "4h"]
+  realized_vol_windows_s: [30, 60, 120, 300, 900]
+  book_imbalance_levels: [1, 5, 10, 20]
+  flow_windows_s: [10, 30, 60, 300]
+  max_nan_ratio: 0.05
+  # Tiers are priors about what to compute and how fresh it must be -- not
+  # hard-coded importance. Survival is decided empirically below.
+  microstructure: { enabled: true, max_selected: 100, max_staleness_seconds: 5 }
+  short_term:     { enabled: true, max_selected: 40,  max_staleness_seconds: 60 }
+  regime:         { enabled: true, max_selected: 15,  max_staleness_seconds: 86400 }
+  selection:
+    methods: ["shap", "mutual_info", "permutation", "rfe"]
+    vote_threshold: 0.5
+    max_features: 120
+    max_correlation: 0.95
+    refit_every_n_retrains: 1
+
+model:
+  enabled_models:
+    - baseline_vol      # closed-form vol benchmark: everything must beat it
+    - logistic
+    - lightgbm
+    - xgboost
+    - catboost
+    - random_forest
+    - lstm
+    - transformer
+    - tft
+    - tabnet
+  ensemble: true
+  ensemble_method: stacking
+  cv_folds: 6
+  embargo_windows: 12
+  train_days: 120
+  validation_days: 21
+  holdout_days: 21
+  calibration: isotonic
+  calibration_days: 14
+  hyperparam_trials: 40
+  random_seed: 42
+
+training:
+  retrain_every_settled_markets: 576
+  retrain_every_hours: 24
+  min_samples_to_train: 5000
+  degradation_trigger: 0.03
+  degradation_window: 200
+  min_brier_improvement: 0.002
+  min_logloss_improvement: 0.002
+  promotion_significance: 0.05
+  max_holdout_calibration_error: 0.03
+  keep_model_versions: 10
+  shadow_windows_before_live: 288
+  # Model readiness gate: Module 7 refuses to train until all of these hold.
+  # "Not enough data yet" must be a loud failure, not a quiet overfit.
+  min_labelled_markets: 2000
+  min_complete_timelines: 1000
+  min_feature_coverage: 0.8
+  min_class_balance: 0.35
+  max_low_quality_fraction: 0.3
+  min_baseline_improvement: 0.005
+
+prediction:
+  min_confidence: 0.60
+  min_edge: 0.04
+  min_ev: 0.02
+  min_expected_roi: 0.03
+  max_calibration_error: 0.04
+  min_model_agreement: 0.6
+  predict_every_seconds: 15
+
+costs:
+  slippage: 0.005
+  taker_fee_bps: 0.0
+  maker_fee_bps: 0.0
+  gas_cost_usdc: 0.0
+  assume_hold_to_settlement: true
+
+execution:
+  order_type: fok
+  min_seconds_into_window: 45
+  min_seconds_to_settlement: 30
+  late_entry_min_edge: 0.12
+  max_spread: 0.03
+  min_book_depth_usdc: 200.0
+  max_slippage: 0.01
+  max_vol_zscore: 3.0
+  max_book_age_ms: 2000
+  allow_early_exit: true
+  early_exit_edge_flip: 0.06
+  max_entries_per_window: 1
+  order_timeout_s: 5.0
+
+sizing:
+  mode: kelly                 # kelly | fixed_fraction | fixed_usdc
+  kelly_fraction: 0.25        # quarter-Kelly: p is a model output, not a fact
+  fixed_fraction: 0.01
+  fixed_usdc: 10.0
+  max_risk_per_trade: 0.02
+  max_position_usdc: 250.0
+  min_position_usdc: 5.0
+  calibration_scaling: true
+  stake_rounding_usdc: 1.0
+
+risk:
+  max_daily_loss_usdc: 100.0
+  max_daily_loss_fraction: 0.05
+  max_weekly_loss_fraction: 0.10
+  max_total_exposure_usdc: 500.0
+  max_concurrent_positions: 1
+  max_consecutive_losses: 5
+  cooldown_minutes: 60
+  heartbeat_timeout_s: 60
+  kill_switch_file: data/KILL_SWITCH
+
+backtest:
+  initial_bankroll_usdc: 1000.0
+  windows_days: [30, 90, 180]
+  min_accuracy: 0.54
+  min_roi: 0.05
+  min_profit_factor: 1.15
+  min_sharpe: 1.0
+  max_drawdown: 0.20
+  max_brier: 0.245
+  min_trades: 200
+  pessimistic_fill: true
+
+paper:
+  initial_bankroll_usdc: 1000.0
+  min_trades_before_live: 500
+  required_significance: 0.05
+  min_roi_before_live: 0.03
+  fill_model: touch
+
+live:
+  enabled: false              # gate 1
+  dry_run: true               # gate 2 (gate 3 is PMBTC_I_UNDERSTAND_LIVE_RISK=yes)
+  funder_address: ""
+  max_orders_per_minute: 6
+  enforce_promotion_gate: true
+
+monitoring:
+  dashboard_enabled: true
+  dashboard_host: 127.0.0.1
+  dashboard_port: 8787
+  metrics_enabled: true
+  metrics_port: 9090
+  alert_on_halt: true
+  alert_on_promotion: true
+  alert_on_settlement_mismatch: true

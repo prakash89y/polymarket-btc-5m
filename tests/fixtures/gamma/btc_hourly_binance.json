@@ -1,0 +1,54 @@
+{
+  "id": "1408320",
+  "question": "Bitcoin Up or Down - February 23, 12PM ET",
+  "conditionId": "0x6340b565fcc3ef2d96855c275d0daf57ae167251f1a7a81a8c1595a6685e7894",
+  "slug": "bitcoin-up-or-down-february-23-12pm-et",
+  "resolutionSource": "https://www.binance.com/en/trade/BTC_USDT",
+  "endDate": "2026-02-23T18:00:00Z",
+  "startDate": "2026-02-21T17:03:01.022826Z",
+  "description": "This market will resolve to \"Up\" if the close price is greater than or equal to the open price for the BTC/USDT 1 hour candle that begins on the time and date specified in the title. Otherwise, this market will resolve to \"Down\".\n\nThe resolution source for this market is information from Binance, specifically the BTC/USDT pair (https://www.binance.com/en/trade/BTC_USDT). The close \u00ab C \u00bb and open \u00ab O \u00bb displayed at the top of the graph for the relevant \"1H\" candle will be used once the data for that candle is finalized.\n\nPlease note that this market is about the price according to Binance BTC/USDT, not according to other sources or spot markets.",
+  "outcomes": "[\"Up\", \"Down\"]",
+  "outcomePrices": "[\"0\", \"1\"]",
+  "active": true,
+  "closed": true,
+  "archived": false,
+  "questionID": "0x8cabb739ffbedf996221a516db5cb4b1cf4d90ea37d61ad4604e736647d74dc2",
+  "enableOrderBook": true,
+  "orderPriceMinTickSize": 0.001,
+  "orderMinSize": 5,
+  "clobTokenIds": "[\"90986872925664782094233775864431633915690564892696664708307507889031100051041\", \"79215888949591327660352091803243685599629453385534284523701862707580284215988\"]",
+  "acceptingOrders": false,
+  "acceptingOrdersTimestamp": "2026-02-21T17:01:54Z",
+  "negRisk": false,
+  "umaResolutionStatuses": "[\"proposed\"]",
+  "resolvedBy": "0x65070BE91477460D8A7AeEb94ef92fe056C2f2A7",
+  "feesEnabled": false,
+  "spread": 0.001,
+  "bestAsk": 0.001,
+  "eventStartTime": "2026-02-23T17:00:00Z",
+  "restricted": true,
+  "events": [
+    {
+      "id": "221580",
+      "ticker": "bitcoin-up-or-down-february-23-12pm-et",
+      "slug": "bitcoin-up-or-down-february-23-12pm-et",
+      "title": "Bitcoin Up or Down - February 23, 12PM ET",
+      "description": "This market will resolve to \"Up\" if the close price is greater than or equal to the open price for the BTC/USDT 1 hour candle that begins on the time and date specified in the title. Otherwise, this market will resolve to \"Down\".\n\nThe resolution source for this market is information from Binance, specifically the BTC/USDT pair (https://www.binance.com/en/trade/BTC_USDT). The close \u00ab C \u00bb and open \u00ab O \u00bb displayed at the top of the graph for the relevant \"1H\" candle will be used once the data for that candle is finalized.\n\nPlease note that this market is about the price according to Binance BTC/USDT, not according to other sources or spot markets.",
+      "resolutionSource": "https://www.binance.com/en/trade/BTC_USDT",
+      "startDate": "2026-02-21T17:04:28.142884Z",
+      "endDate": "2026-02-23T18:00:00Z",
+      "seriesSlug": "btc-up-or-down-hourly",
+      "closed": true,
+      "series": [
+        {
+          "id": "10114",
+          "ticker": "btc-up-or-down-hourly",
+          "slug": "btc-up-or-down-hourly",
+          "title": "BTC Up or Down Hourly",
+          "seriesType": "single",
+          "recurrence": "hourly"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+services:
+  pmbtc:
+    build:
+      context: .
+      args:
+        EXTRAS: ".[data]"
+    image: pmbtc:latest
+    env_file:
+      - .env
+    environment:
+      PMBTC_APP__MODE: paper
+      PMBTC_LOGGING__JSON_LOGS: "true"
+    volumes:
+      # Config is read-only in the container: changing behaviour is a deploy,
+      # not an in-place edit on a running bot.
+      - ./config:/app/config:ro
+      - pmbtc-data:/app/data
+      - pmbtc-logs:/app/logs
+      - pmbtc-artifacts:/app/artifacts
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: ["doctor"]
+
+volumes:
+  pmbtc-data:
+  pmbtc-logs:
+  pmbtc-artifacts:

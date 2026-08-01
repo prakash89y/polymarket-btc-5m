@@ -1,0 +1,201 @@
+name: CI
+
+# Every push and every pull request. There is no path that skips these.
+on:
+  push:
+    branches: [main, develop, "feature/**", "release/**", "hotfix/**"]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  # A newer push supersedes an in-flight run on the same ref, except on the
+  # protected branches where every commit's result is a record worth keeping.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' }}
+
+env:
+  PYTHONUNBUFFERED: "1"
+  # Tests must never reach the network. Anything that tries will fail loudly
+  # rather than making CI depend on Polymarket being up.
+  PMBTC_CONFIG: config/config.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------- #
+  lint:
+    name: Ruff + MyPy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[data,models,dev]"
+      - name: Ruff
+        run: ruff check src tests scripts
+      # `ruff format --check` is deliberately absent. The codebase predates the
+      # formatter and adopting it means one reformat commit touching ~60 files.
+      # That is a decision to take on purpose, not a side effect of adding CI.
+      - name: MyPy
+        run: mypy
+
+  # ---------------------------------------------------------------------- #
+  tests:
+    name: Tests (${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[data,models,dev]"
+      - name: Unit and integration tests
+        # -m "not network": the suite is offline by construction, and this
+        # makes that a property of the run rather than a convention.
+        run: pytest -q -m "not network" --cov=pmbtc --cov-report=term-missing
+      - name: Upload coverage
+        if: matrix.python == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: .coverage
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------- #
+  determinism:
+    name: Replay determinism and schema validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[data,models,dev]"
+
+      - name: Replay determinism
+        # The committed baseline records how the parser reads real archived
+        # payloads. A change here means historical interpretation moved.
+        run: pytest -q tests/test_gamma.py::TestCommittedBaseline
+
+      - name: Four-way feature identity
+        # Live collection, archive replay, dataset export, and the training
+        # loader must produce one fingerprint.
+        run: pytest -q tests/test_integration_pipeline.py
+
+      - name: Feature schema validation
+        run: python scripts/validate_schemas.py
+
+      - name: Feature pipeline determinism
+        run: python scripts/validate_module6.py
+
+      - name: Dataset and leakage invariants
+        run: pytest -q tests/test_dataset.py::TestLeakageDetection tests/test_dataset.py::TestImmutability
+
+  # ---------------------------------------------------------------------- #
+  model-framework:
+    name: Model registry and readiness validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[data,models,dev]"
+      - name: Training framework on fixtures
+        run: python scripts/validate_module7.py
+      - name: Model registry and promotion gate
+        run: pytest -q tests/test_training.py
+      - name: Readiness gate blocks an empty dataset
+        # The gate must refuse, and must say why. A gate that passes on no data
+        # is not a gate.
+        run: |
+          python - <<'PY'
+          import sys
+          from pmbtc.config import load_config
+          from pmbtc.models import check_readiness
+          report = check_readiness(load_config(), [], [])
+          assert not report.ready, "readiness gate passed on an empty dataset"
+          names = {c.name for c in report.checks}
+          assert {"labelled_markets", "complete_timelines", "feature_coverage"} <= names
+          print("readiness gate correctly blocks:", len(report.failures), "unmet thresholds")
+          PY
+
+  # ---------------------------------------------------------------------- #
+  security:
+    name: Secrets and dependency scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the secret scan sees every commit, not just the tip.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Repository hygiene and secret scan
+        run: python scripts/validate_repo_hygiene.py
+
+      - name: Gitleaks (full history)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: false
+
+      - name: Install for dependency audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[data,models,dev]"
+          pip install pip-audit
+
+      - name: Dependency vulnerability scan
+        # Fails the build on a known CVE in anything we ship.
+        run: pip-audit --strict --desc
+
+  # ---------------------------------------------------------------------- #
+  # A single required check for branch protection, so the rule does not need
+  # updating every time a job is added.
+  ci-complete:
+    name: CI complete
+    runs-on: ubuntu-latest
+    needs: [lint, tests, determinism, model-framework, security]
+    if: always()
+    steps:
+      - name: Verify every job succeeded
+        run: |
+          RESULTS="${{ join(needs.*.result, ' ') }}"
+          echo "job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "::error::A required job did not succeed ($result)"
+              exit 1
+            fi
+          done
+          echo "All required checks passed."

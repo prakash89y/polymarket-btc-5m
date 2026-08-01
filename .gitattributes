@@ -1,0 +1,24 @@
+# Normalise line endings so a Windows collector and a Linux CI runner produce
+# byte-identical checkouts. Without this, CRLF/LF differences alone would make
+# the replay baseline compare unequal across platforms.
+* text=auto eol=lf
+
+# Fixtures are compared byte-for-byte by the replay regression test. Any
+# translation applied to them would break determinism, which is the one
+# guarantee this project cannot lose.
+tests/fixtures/**    -text
+*.jsonl.gz           binary
+*.parquet            binary
+*.pkl                binary
+
+# Windows-native files keep CRLF.
+*.bat                text eol=crlf
+*.ps1                text eol=crlf
+
+# Generated documentation — collapsed in diffs, still reviewable on request.
+docs/features.md     linguist-generated=true
+docs/api/**          linguist-generated=true
+
+# Exclude fixtures and generated docs from language statistics so the repo
+# reports as the Python project it is.
+tests/fixtures/**    linguist-vendored=true

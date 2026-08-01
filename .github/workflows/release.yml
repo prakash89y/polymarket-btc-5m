@@ -1,0 +1,98 @@
+name: Release
+
+# Tag-driven. A release is a tag on main, never a manual button that skips CI.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: Re-verify before releasing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[data,models,dev]"
+
+      # A tag can be pushed to any commit. Re-run the gates rather than trusting
+      # that CI passed on whatever this points at.
+      - name: Lint and types
+        run: |
+          ruff check src tests scripts
+          mypy
+      - name: Tests
+        run: pytest -q -m "not network"
+      - name: Determinism and schemas
+        run: |
+          python scripts/validate_schemas.py
+          python scripts/validate_module6.py
+      - name: Repository hygiene
+        run: python scripts/validate_repo_hygiene.py
+
+      - name: Record schema versions
+        id: schemas
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          from pmbtc.dataset.schema import DATASET_RECORD_VERSION, FEATURE_SCHEMA_VERSION
+          from pmbtc.features.provider import canonical_feature_schema_version
+          from pmbtc.settlement.parser import PARSER_VERSION
+          print(f"feature={canonical_feature_schema_version()}")
+          print(f"dataset_feature={FEATURE_SCHEMA_VERSION}")
+          print(f"dataset_record={DATASET_RECORD_VERSION}")
+          print(f"settlement={PARSER_VERSION}")
+          PY
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # The section for this version, up to the next heading.
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" {found=1; next}
+            found && /^## \[/ {exit}
+            found {print}
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "::error::No CHANGELOG section for $VERSION"
+            exit 1
+          fi
+          {
+            echo ""
+            echo "### Schema versions"
+            echo ""
+            echo "| schema | version |"
+            echo "|---|---|"
+            echo "| feature | \`${{ steps.schemas.outputs.feature }}\` |"
+            echo "| dataset (features) | \`${{ steps.schemas.outputs.dataset_feature }}\` |"
+            echo "| dataset (records) | \`${{ steps.schemas.outputs.dataset_record }}\` |"
+            echo "| settlement | \`${{ steps.schemas.outputs.settlement }}\` |"
+          } >> release_notes.md
+
+      - name: Build distribution
+        run: |
+          pip install build
+          python -m build
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.changelog.outputs.version }}"
+          body_path: release_notes.md
+          draft: false
+          # Anything with a pre-release suffix is marked as such automatically.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: |
+            dist/*.whl
+            dist/*.tar.gz

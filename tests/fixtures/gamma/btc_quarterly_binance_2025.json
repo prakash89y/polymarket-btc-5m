@@ -1,0 +1,41 @@
+{
+  "id": "517838",
+  "question": "Bitcoin up in Q1 2025?",
+  "conditionId": "0xa9444a9067fb2958ac36dd3f0ea25c07da5c39dc595643280b5ec037334b75de",
+  "slug": "bitcoin-up-in-q1-2025",
+  "resolutionSource": "",
+  "endDate": "2025-03-31T12:00:00Z",
+  "startDate": "2025-01-07T17:00:36.927636Z",
+  "description": "This market will resolve to \"Up\" if the Binance 1 minute candle for BTCUSDT on 31 March '25 23:59 in the ET timezone has a final \u201cclose\u201d price is higher than 93,445.45.\n\nThis market will resolve to \"Down\" if the Binance 1 minute candle for BTCUSDT on 31 March '25 23:59 in the ET timezone has a final \u201cclose\u201d price is lower than 93,445.45.\n\nThis market will resolve to \"50-50\" if the Binance 1 minute candle for BTCUSDT on 31 March '25 23:59 in the ET timezone has a final \u201cclose\u201d price is of precisely 93,445.45.\n\nThe resolution source for this market is Binance, specifically the BTCUSDT \"close\" prices currently available at https://www.binance.com/en/trade/BTC_USDT with \u201c1m\u201d and \u201cCandles\u201d selected on the top bar.\n\nPlease note that this market is about the price according to Binance BTCUSDT, not according to other sources or spot markets.\n",
+  "outcomes": "[\"Up\", \"Down\"]",
+  "outcomePrices": "[\"0\", \"1\"]",
+  "active": true,
+  "closed": true,
+  "archived": false,
+  "questionID": "0xb6a17e6442f360824cc866b24ef43b20598fc2eebe395cebd189c48f33b5d258",
+  "enableOrderBook": true,
+  "orderPriceMinTickSize": 0.001,
+  "orderMinSize": 5,
+  "clobTokenIds": "[\"82927494066775506689099766141381125044040984047946118898947348013267483041764\", \"57986198515554610231731678339981375699725311806987090344113037127960668681893\"]",
+  "acceptingOrders": false,
+  "acceptingOrdersTimestamp": "2025-01-07T16:59:09Z",
+  "negRisk": false,
+  "umaResolutionStatuses": "[\"proposed\"]",
+  "resolvedBy": "0x6A9D222616C90FcA5754cd1333cFD9b7fb6a4F74",
+  "feesEnabled": false,
+  "spread": 0.001,
+  "bestAsk": 0.001,
+  "restricted": true,
+  "events": [
+    {
+      "id": "16482",
+      "ticker": "bitcoin-up-in-q1-2025",
+      "slug": "bitcoin-up-in-q1-2025",
+      "title": "Bitcoin up in Q1 2025?",
+      "description": "This market will resolve to \"Up\" if the Binance 1 minute candle for BTCUSDT on 31 March '25 23:59 in the ET timezone has a final \u201cclose\u201d price is higher than 93,445.45.\n\nThis market will resolve to \"Down\" if the Binance 1 minute candle for BTCUSDT on 31 March '25 23:59 in the ET timezone has a final \u201cclose\u201d price is lower than 93,445.45.\n\nThis market will resolve to \"50-50\" if the Binance 1 minute candle for BTCUSDT on 31 March '25 23:59 in the ET timezone has a final \u201cclose\u201d price is of precisely 93,445.45.\n\nThe resolution source for this market is Binance, specifically the BTCUSDT \"close\" prices currently available at https://www.binance.com/en/trade/BTC_USDT with \u201c1m\u201d and \u201cCandles\u201d selected on the top bar.\n\nPlease note that this market is about the price according to Binance BTCUSDT, not according to other sources or spot markets.\n",
+      "startDate": "2025-01-07T17:01:25.917163Z",
+      "endDate": "2025-03-31T12:00:00Z",
+      "closed": true
+    }
+  ]
+}

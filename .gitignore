@@ -1,0 +1,146 @@
+# =============================================================================
+# Secrets — nothing here may ever reach a commit.
+# Ordered first so it is the first thing a reviewer reads.
+# =============================================================================
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+credentials.json
+secrets.json
+secrets.yaml
+secrets.yml
+*_secret*
+*_secrets*
+*apikey*
+*api_key*
+*.private
+id_rsa*
+id_ed25519*
+
+# =============================================================================
+# Runtime state and collected data.
+#
+# `data/` grows ~11 MB/hour of gzipped frame archives (~95 GB/year). It is
+# deliberately NOT versioned: the archives are reproducible by re-collection,
+# and their interpretation is pinned by tests/fixtures/replay_baseline.json,
+# which is 24 KB of committed JSON. See docs/GITHUB_WORKFLOW.md for why Git LFS
+# is the wrong tool here.
+# =============================================================================
+data/
+logs/
+artifacts/
+exports/
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+
+# Datasets and archives, wherever they land.
+*.parquet
+*.arrow
+*.feather
+*.jsonl.gz
+*.tar.gz
+*.zip
+!tests/fixtures/**/*.jsonl.gz
+
+# Model artifacts — versioned by the model registry, not by git.
+*.pkl
+*.pickle
+*.joblib
+*.onnx
+*.pt
+*.pth
+*.h5
+*.ckpt
+*.safetensors
+models/*/estimator.pkl
+
+# Stray run logs from ad-hoc invocations.
+*.out.log
+*.err.log
+collect_run.log
+run_service.log
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.virtualenv/
+
+# =============================================================================
+# Tooling caches
+# =============================================================================
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+.tox/
+.nox/
+.cache/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+.benchmarks/
+
+# =============================================================================
+# Editors and OS
+# =============================================================================
+.idea/
+.vscode/
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Notebooks
+.ipynb_checkpoints/
+*.ipynb
+
+# Temporary
+*.tmp
+*.temp
+*.bak
+*.orig
+*.rej
+tmp/
+temp/
+scratch/

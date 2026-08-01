@@ -1,0 +1,57 @@
+{
+  "id": "3221479",
+  "question": "Bitcoin Up or Down - July 31, 9:00AM-9:15AM ET",
+  "conditionId": "0xebd44f310858096f7b57acf053e981b128b5e51021ee1e89f5485a718bca0546",
+  "slug": "btc-updown-15m-1785502800",
+  "resolutionSource": "https://data.chain.link/streams/btc-usd",
+  "endDate": "2026-07-31T13:15:00Z",
+  "startDate": "2026-07-30T13:07:29.571278Z",
+  "description": "This market will resolve to \"Up\" if the Bitcoin price at the end of the time range specified in the title is greater than or equal to the price at the beginning of that range. Otherwise, it will resolve to \"Down\".\nThe resolution source for this market is information from Chainlink, specifically the BTC/USD data stream available at https://data.chain.link/streams/btc-usd.\nPlease note that this market is about the price according to Chainlink data stream BTC/USD, not according to other sources or spot markets.",
+  "outcomes": "[\"Up\", \"Down\"]",
+  "outcomePrices": "[\"0.525\", \"0.475\"]",
+  "active": true,
+  "closed": false,
+  "archived": false,
+  "questionID": "0x1687ed13e5125d6b3be1467d3520a729a117df6c2bc544ccae58634042be92fa",
+  "enableOrderBook": true,
+  "orderPriceMinTickSize": 0.01,
+  "orderMinSize": 5,
+  "clobTokenIds": "[\"85268680204523247755797475015758096365591539718196785683557202633269424671747\", \"88002875619103901037545410650681418365960133608900194119414321774261546622367\"]",
+  "acceptingOrders": true,
+  "acceptingOrdersTimestamp": "2026-07-30T13:06:41Z",
+  "negRisk": false,
+  "umaResolutionStatuses": "[]",
+  "feesEnabled": true,
+  "makerBaseFee": 1000,
+  "takerBaseFee": 1000,
+  "spread": 0.01,
+  "bestBid": 0.52,
+  "bestAsk": 0.53,
+  "eventStartTime": "2026-07-31T13:00:00Z",
+  "restricted": true,
+  "events": [
+    {
+      "id": "772394",
+      "ticker": "btc-updown-15m-1785502800",
+      "slug": "btc-updown-15m-1785502800",
+      "title": "Bitcoin Up or Down - July 31, 9:00AM-9:15AM ET",
+      "description": "This market will resolve to \"Up\" if the Bitcoin price at the end of the time range specified in the title is greater than or equal to the price at the beginning of that range. Otherwise, it will resolve to \"Down\".\nThe resolution source for this market is information from Chainlink, specifically the BTC/USD data stream available at https://data.chain.link/streams/btc-usd.\nPlease note that this market is about the price according to Chainlink data stream BTC/USD, not according to other sources or spot markets.",
+      "resolutionSource": "https://data.chain.link/streams/btc-usd",
+      "startDate": "2026-07-30T13:07:29.571278Z",
+      "endDate": "2026-07-31T13:15:00Z",
+      "startTime": "2026-07-31T13:00:00Z",
+      "seriesSlug": "btc-up-or-down-15m",
+      "closed": false,
+      "series": [
+        {
+          "id": "10192",
+          "ticker": "btc-up-or-down-15m",
+          "slug": "btc-up-or-down-15m",
+          "title": "BTC Up or Down 15m",
+          "seriesType": "single",
+          "recurrence": "15m"
+        }
+      ]
+    }
+  ]
+}

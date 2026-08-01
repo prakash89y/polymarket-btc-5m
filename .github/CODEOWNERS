@@ -1,0 +1,17 @@
+* @prakash89y
+
+# Anything that changes what stored data *means* needs the closest review:
+# a moved feature formula or settlement rule silently invalidates history.
+/src/pmbtc/settlement/   @prakash89y
+/src/pmbtc/features/     @prakash89y
+/src/pmbtc/dataset/      @prakash89y
+/src/pmbtc/models/       @prakash89y
+
+# Safety gates.
+/src/pmbtc/config.py     @prakash89y
+/.github/                @prakash89y
+/SECURITY.md             @prakash89y
+
+# The determinism contract. Changing these means historical interpretation
+# moved, which is never a routine change.
+/tests/fixtures/         @prakash89y
