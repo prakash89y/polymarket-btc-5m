@@ -52,8 +52,12 @@ class Decision:
     edge: float = 0.0
     #: Expected profit per USDC staked, after the entry price is paid.
     ev_per_usdc: float = 0.0
-    #: Probability assigned to the chosen outcome.
+    #: Probability assigned to the chosen outcome, after any shrinkage.
     confidence: float = 0.5
+    #: The raw model probability before confidence shrinkage, kept so a report
+    #: can show how much of an abstention was the model and how much was us
+    #: distrusting it.
+    raw_prob_up: float = 0.5
 
     @property
     def expected_roi(self) -> float:
@@ -67,6 +71,7 @@ class Decision:
             "skip_reason": self.skip_reason.value if self.skip_reason else None,
             "detail": self.detail,
             "model_prob_up": round(self.model_prob_up, 6),
+            "raw_prob_up": round(self.raw_prob_up, 6),
             "market_prob_up": round(self.market_prob_up, 6),
             "entry_price": round(self.entry_price, 6),
             "edge": round(self.edge, 6),
@@ -87,6 +92,21 @@ class Decision:
 
 def _skip(reason: SkipReason, detail: str, **fields: Any) -> Decision:
     return Decision(trade=False, skip_reason=reason, detail=detail, **fields)
+
+
+def shrink_toward_fair(probability: float, shrinkage: float) -> float:
+    """Pull a probability toward 0.5 by ``shrinkage``.
+
+    ``shrinkage = 0`` leaves it untouched; ``1`` collapses it to a coin flip.
+    Applied before any gate, because an overconfident probability is dangerous
+    at exactly two points — it decides whether we trade, and Kelly sizing is
+    convex in it, so the same 0.05 of overconfidence costs more the larger the
+    stated edge.
+    """
+    if shrinkage <= 0.0:
+        return probability
+    factor = 1.0 - min(1.0, shrinkage)
+    return 0.5 + (probability - 0.5) * factor
 
 
 class DecisionEngine:
@@ -118,23 +138,47 @@ class DecisionEngine:
         execution = self.config.execution
         prediction = self.config.prediction
 
+        # --- 0. Distrust the model in proportion to its recent error ---- #
+        # Done first so every downstream gate sees the probability we are
+        # actually willing to act on, not the one the model asserted.
+        raw_prob_up = model_prob_up
+        if prediction.confidence_shrinkage > 0.0:
+            scale = 1.0
+            if calibration_error is not None and prediction.max_calibration_error > 0:
+                scale = min(1.0, calibration_error / prediction.max_calibration_error)
+            model_prob_up = shrink_toward_fair(
+                model_prob_up, prediction.confidence_shrinkage * scale
+            )
+
         # --- 1. Is the data real? ------------------------------------- #
         if not quote.valid:
             return _skip(
                 SkipReason.STALE_DATA,
                 f"unusable quote bid={quote.best_bid} ask={quote.best_ask}",
+                raw_prob_up=raw_prob_up,
             )
-        if quote.age_ms > execution.max_book_age_ms:
+        # The book must still be fresh when the order *lands*, not when we
+        # looked at it. Ignoring the round trip is how a backtest fills against
+        # a book that had already moved.
+        effective_age = quote.age_ms + self.costs.config.assumed_latency_ms
+        if effective_age > execution.max_book_age_ms:
             return _skip(
                 SkipReason.STALE_DATA,
-                f"book {quote.age_ms}ms old, budget {execution.max_book_age_ms}ms",
+                f"book {quote.age_ms}ms old + {self.costs.config.assumed_latency_ms}ms "
+                f"latency = {effective_age}ms on arrival, budget "
+                f"{execution.max_book_age_ms}ms",
+                raw_prob_up=raw_prob_up,
             )
 
         market_prob = self.costs.implied_probability(quote)
         assert market_prob is not None  # quote.valid implies a mid
         spread = quote.spread
         assert spread is not None
-        base = {"model_prob_up": model_prob_up, "market_prob_up": market_prob}
+        base = {
+            "model_prob_up": model_prob_up,
+            "raw_prob_up": raw_prob_up,
+            "market_prob_up": market_prob,
+        }
 
         # --- 2. Is the market tradeable? ------------------------------ #
         if spread > execution.max_spread:
@@ -257,6 +301,7 @@ class DecisionEngine:
             trade=True,
             detail="all gates passed",
             model_prob_up=model_prob_up,
+            raw_prob_up=raw_prob_up,
             market_prob_up=market_prob,
             outcome=outcome,
             entry_price=entry,

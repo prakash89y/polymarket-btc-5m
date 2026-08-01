@@ -19,7 +19,9 @@ from pmbtc.backtest import (
     FillModel,
     MarketProbabilityModel,
     compute_metrics,
+    decompose,
     evaluate_backtest,
+    run_strict_walk_forward,
 )
 from pmbtc.config import Config
 from pmbtc.constants import Outcome, SkipReason
@@ -192,6 +194,86 @@ def main() -> int:
         "break-even is the price paid, not 0.5",
         metrics.breakeven_win_rate > 0.5,
         f"{metrics.breakeven_win_rate:.4f}",
+    )
+
+    console.print("\n[bold]10. The edge decomposition reconciles exactly[/]")
+    for label, name in ((1, "always up"), (0, "always down"), (None, "mixed")):
+        run = BacktestEngine(config).run(rows(40, label=label), ConstantModel(0.9))
+        decomposition = decompose(run, config.costs)
+        realised = compute_metrics(run).net_pnl_usdc
+        check(
+            f"ladder sums to realised P&L ({name})",
+            decomposition.reconciles(realised),
+            f"error {decomposition.reconciliation_error_usdc:+.2e} USDC",
+        )
+
+    console.print("\n[bold]11. Costs are attributed, not assumed away[/]")
+    winning = BacktestEngine(config).run(rows(40, label=1), ConstantModel(0.9))
+    d = decompose(winning, config.costs)
+    check(
+        "crossing the spread costs money",
+        d.spread_cost_usdc > 0,
+        f"{d.spread_cost_usdc:.2f} USDC",
+    )
+    check(
+        "raw forecast edge exceeds realised profit",
+        d.raw_edge_usdc > d.net_profit_usdc,
+        f"{d.raw_edge_usdc:.2f} -> {d.net_profit_usdc:.2f} USDC",
+    )
+    losing = decompose(
+        BacktestEngine(config).run(rows(40, label=0), ConstantModel(0.95)), config.costs
+    )
+    check(
+        "risk limits that block losers show as a saving",
+        losing.risk_limit_usdc < 0,
+        f"{losing.risk_limit_usdc:.2f} USDC (a negative cost is a benefit)",
+    )
+
+    console.print("\n[bold]12. Latency is charged against book freshness[/]")
+    latent = Config(costs={"assumed_latency_ms": 500})
+    aged = Quote(
+        best_bid=0.49, best_ask=0.51, bid_depth_usdc=500.0, ask_depth_usdc=500.0,
+        age_ms=1_800,
+    )
+    stale = DecisionEngine(latent).decide(
+        model_prob_up=0.9, quote=aged, seconds_into_window=120, seconds_to_settlement=180
+    )
+    check(
+        "a book that expires in flight is refused",
+        not stale.trade and stale.skip_reason is SkipReason.STALE_DATA,
+        stale.detail,
+    )
+
+    console.print("\n[bold]13. Strict walk-forward never trades its training data[/]")
+    wf = run_strict_walk_forward(
+        config, rows(120), lambda _: MarketProbabilityModel(), model_name="market", n_folds=3
+    )
+    check("folds were produced", bool(wf.folds), f"{len(wf.folds)} fold(s)")
+    check(
+        "every fold trains strictly before it tests",
+        all(f.train_end_ms < f.test_start_ms for f in wf.folds),
+    )
+    check(
+        "markets adjacent to the test period are purged",
+        any(f.purged_markets > 0 for f in wf.folds),
+        f"max purge {max((f.purged_markets for f in wf.folds), default=0)} market(s)",
+    )
+    repeat = run_strict_walk_forward(
+        config, rows(120), lambda _: ConstantModel(0.85), n_folds=3
+    )
+    again = run_strict_walk_forward(
+        config, rows(120), lambda _: ConstantModel(0.85), n_folds=3
+    )
+    check("strict walk-forward is deterministic", repeat.as_dict() == again.as_dict())
+
+    console.print("\n[bold]14. A better Brier score is not a deployment reason[/]")
+    doomed = BacktestEngine(config).run(rows(40, label=0), ConstantModel(0.95))
+    verdict = evaluate_backtest(config, doomed)
+    ev_check = next(c for c in verdict.checks if c.name == "positive_ev_after_costs")
+    check("the gate demands positive EV after costs", not ev_check.passed, ev_check.detail)
+    check(
+        "the gate verifies its own attribution",
+        any(c.name == "decomposition_reconciles" for c in verdict.checks),
     )
 
     console.print()

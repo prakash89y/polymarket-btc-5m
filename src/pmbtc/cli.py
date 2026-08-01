@@ -737,6 +737,13 @@ def backtest(
     walk_forward: Annotated[
         bool, typer.Option("--walk-forward", help="Gate every configured lookback.")
     ] = False,
+    strict: Annotated[
+        bool,
+        typer.Option("--strict", help="Strict walk-forward: refit the model at every fold."),
+    ] = False,
+    folds: Annotated[
+        int, typer.Option("--folds", help="Folds for --strict.")
+    ] = 4,
 ) -> None:
     """Simulate the strategy over settled windows and apply the deployment gate.
 
@@ -744,6 +751,8 @@ def backtest(
     appears in both the fit and the evaluation. ``--model market`` is the null
     control: it forecasts what the book forecasts, so it should place no trades.
     """
+    from collections.abc import Mapping, Sequence
+
     import numpy as np
 
     from pmbtc.backtest import (
@@ -753,6 +762,7 @@ def backtest(
         MarketProbabilityModel,
         ProbabilityModel,
         evaluate_backtest,
+        run_strict_walk_forward,
         run_walk_forward,
     )
     from pmbtc.dataset import build_rows, open_dataset_store
@@ -767,6 +777,58 @@ def backtest(
         console.print("[yellow]No labelled rows to backtest.[/]")
         raise typer.Exit(code=1)
 
+    columns = sorted({k for r in rows for k in r if k.startswith("f_")})
+    seed = cfg.model.random_seed
+
+    def fit(train_rows: Sequence[Mapping[str, object]]) -> ProbabilityModel:
+        """Fit the chosen strategy on exactly the rows given, and nothing else."""
+        if model == "market":
+            return MarketProbabilityModel()
+        x = np.array([[_num(r.get(c)) for c in columns] for r in train_rows], dtype=float)
+        y = np.array([r["label"] for r in train_rows], dtype=int)
+        if len(set(y.tolist())) < 2:
+            # One class in the training slice: nothing to learn, so fall back to
+            # the market rather than fitting a degenerate constant.
+            return MarketProbabilityModel()
+        estimator = (
+            GradientBoostingBaseline(seed)
+            if model == "gradient_boosting"
+            else LogisticBaseline(seed)
+        )
+        estimator.fit(x, y)
+        return EstimatorModel(estimator, columns, name=model)
+
+    engine = BacktestEngine(
+        cfg,
+        fill_model=FillModel(
+            CostModel(cfg.costs), style=fill, pessimistic=cfg.backtest.pessimistic_fill  # type: ignore[arg-type]
+        ),
+    )
+
+    # Strict walk-forward refits at every fold, so it consumes the whole
+    # history rather than a single hand-placed split.
+    if strict:
+        swf = run_strict_walk_forward(
+            cfg, rows, fit, engine=engine, model_name=model, n_folds=folds,
+            decision_horizon_seconds=horizon,
+        )
+        console.print(swf.render())
+        if not swf.folds:
+            console.print(
+                "[yellow]Not enough settled markets for a strict walk-forward yet.[/]"
+            )
+        out = (
+            cfg.resolved_path(cfg.app.artifact_dir)
+            / "reports"
+            / f"backtest-strict-{model}-{fill}.json"
+        )
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(swf.as_dict(), indent=2), encoding="utf-8")
+        console.print(f"\nreport: {out}")
+        if not swf.approved:
+            raise typer.Exit(code=1)
+        return
+
     # Split on a market boundary: a market whose T-240 row trained the model
     # must not have its T-60 row evaluated by it.
     market_order = list(dict.fromkeys(r["condition_id"] for r in rows))
@@ -778,31 +840,7 @@ def backtest(
         console.print("[yellow]Nothing left to evaluate after the split.[/]")
         raise typer.Exit(code=1)
 
-    strategy: ProbabilityModel
-    if model == "market":
-        strategy = MarketProbabilityModel()
-    else:
-        columns = sorted({k for r in rows for k in r if k.startswith("f_")})
-        x = np.array([[_num(r.get(c)) for c in columns] for r in train_rows], dtype=float)
-        y = np.array([r["label"] for r in train_rows], dtype=int)
-        if len(set(y.tolist())) < 2:
-            console.print("[yellow]Training slice has only one class — cannot fit.[/]")
-            raise typer.Exit(code=1)
-        seed = cfg.model.random_seed
-        estimator = (
-            GradientBoostingBaseline(seed)
-            if model == "gradient_boosting"
-            else LogisticBaseline(seed)
-        )
-        estimator.fit(x, y)
-        strategy = EstimatorModel(estimator, columns, name=model)
-
-    engine = BacktestEngine(
-        cfg,
-        fill_model=FillModel(
-            CostModel(cfg.costs), style=fill, pessimistic=cfg.backtest.pessimistic_fill  # type: ignore[arg-type]
-        ),
-    )
+    strategy = fit(train_rows)
     console.print(
         f"markets: train={len(train_ids)} test={len(market_order) - len(train_ids)} "
         f"| rows: train={len(train_rows)} test={len(test_rows)} | fill={fill}"

@@ -204,17 +204,24 @@ The public surface of each package, taken from `__all__`.
 - **`BacktestResult`** *(class)* — Every window the engine looked at, in order, plus how it ended.
 - **`ColumnMap`** *(class)* — Which dataset columns carry the book. Named once, in one place.
 - **`ConstantModel`** *(class)* — Always the same probability. Used to exercise the gates in tests.
+- **`EdgeDecomposition`** *(class)* — The full waterfall from raw forecast edge to realised profit.
+- **`EdgeLine`** *(class)* — One rung of the ladder.
 - **`EstimatorModel`** *(class)* — Wraps a fitted estimator, pinning the column order it was trained on.
 - **`FillModel`** *(class)* — Prices and sizes an entry against the book that was recorded.
 - **`FillOutcome`** *(class)* — A fill, or a named reason there wasn't one.
 - **`GateCheck`** *(class)* — GateCheck(name: 'str', passed: 'bool', detail: 'str')
 - **`MarketProbabilityModel`** *(class)* — The book's own forecast. The null strategy, and the bar to beat.
 - **`ProbabilityModel`** *(object)* — 
+- **`StrategyFactory`** *(object)* — 
+- **`StrictWalkForwardReport`** *(class)* — Out-of-sample results from a model refitted at every step.
+- **`WalkForwardFold`** *(class)* — One refit-and-test step.
 - **`WalkForwardReport`** *(class)* — One report per lookback, plus the combined verdict.
 - **`WindowResult`** *(class)* — One evaluated window — traded or not.
 - **`compute_metrics`** *(function)* — Summarise a completed run. Pure function of the run's windows.
+- **`decompose`** *(function)* — Attribute a completed run's P&L to its causes.
 - **`evaluate_backtest`** *(function)* — Score a completed run against ``config.backtest``.
 - **`quote_from_row`** *(function)* — Reconstruct the book as it stood at the snapshot instant.
+- **`run_strict_walk_forward`** *(function)* — Refit at every fold and trade only forward.
 - **`run_walk_forward`** *(function)* — Run and gate the backtest over every configured lookback.
 - **`slice_recent`** *(function)* — Rows settling within ``days`` of the last settlement in the data.
 

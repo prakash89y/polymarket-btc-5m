@@ -39,6 +39,7 @@ from pmbtc.backtest.adapters import (
     EstimatorModel,
     MarketProbabilityModel,
 )
+from pmbtc.backtest.attribution import EdgeDecomposition, EdgeLine, decompose
 from pmbtc.backtest.engine import (
     BacktestEngine,
     BacktestResult,
@@ -50,7 +51,15 @@ from pmbtc.backtest.engine import (
 from pmbtc.backtest.fills import FillModel, FillOutcome
 from pmbtc.backtest.metrics import BacktestMetrics, compute_metrics
 from pmbtc.backtest.report import BacktestReport, GateCheck, evaluate_backtest
-from pmbtc.backtest.walkforward import WalkForwardReport, run_walk_forward, slice_recent
+from pmbtc.backtest.walkforward import (
+    StrategyFactory,
+    StrictWalkForwardReport,
+    WalkForwardFold,
+    WalkForwardReport,
+    run_strict_walk_forward,
+    run_walk_forward,
+    slice_recent,
+)
 
 __all__ = [
     "BacktestEngine",
@@ -59,17 +68,24 @@ __all__ = [
     "BacktestResult",
     "ColumnMap",
     "ConstantModel",
+    "EdgeDecomposition",
+    "EdgeLine",
     "EstimatorModel",
     "FillModel",
     "FillOutcome",
     "GateCheck",
     "MarketProbabilityModel",
     "ProbabilityModel",
+    "StrategyFactory",
+    "StrictWalkForwardReport",
+    "WalkForwardFold",
     "WalkForwardReport",
     "WindowResult",
     "compute_metrics",
+    "decompose",
     "evaluate_backtest",
     "quote_from_row",
+    "run_strict_walk_forward",
     "run_walk_forward",
     "slice_recent",
 ]

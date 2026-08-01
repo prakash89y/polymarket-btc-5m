@@ -719,6 +719,14 @@ class PredictionConfig(_Base):
     min_model_agreement: float = Field(default=0.6, ge=0, le=1)
     #: How often the prediction loop runs inside a window.
     predict_every_seconds: int = Field(default=15, ge=1)
+    #: Pull probabilities toward 0.5 before they are acted on, in proportion to
+    #: the model's recent calibration error. A model that says 0.90 when it is
+    #: right 0.70 of the time is not merely inaccurate — it is dangerous, because
+    #: Kelly sizing is convex in the probability. This shrinks *whether* we
+    #: judge the edge real; ``sizing.calibration_scaling`` separately shrinks
+    #: *how much* we risk. Both are deliberate and independent brakes.
+    #: Defaults to 0.0 — no shrinkage — so enabling it is an explicit choice.
+    confidence_shrinkage: float = Field(default=0.0, ge=0, le=1)
 
 
 class CostConfig(_Base):
@@ -739,6 +747,13 @@ class CostConfig(_Base):
     #: If we let a winner settle rather than selling out, we pay no exit cost —
     #: modelled explicitly because it materially changes optimal exit policy.
     assume_hold_to_settlement: bool = True
+    #: Round-trip order latency: decision -> exchange -> acknowledgement.
+    #: The book we priced against is already ``quote.age_ms`` old when we look
+    #: at it and will be ``age + latency`` old when the order lands, and on a
+    #: 300-second instrument that difference is the difference between the fill
+    #: we modelled and the one we get. Measured ~220ms to the Polymarket CLOB
+    #: while building Module 5; the default leaves headroom over that.
+    assumed_latency_ms: int = Field(default=500, ge=0)
 
 
 class ExecutionConfig(_Base):

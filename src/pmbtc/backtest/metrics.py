@@ -26,6 +26,8 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from pmbtc.models.calibration import CalibrationCurve, EvaluationMetrics, evaluate
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from pmbtc.backtest.engine import BacktestResult, WindowResult
 
@@ -74,10 +76,29 @@ class BacktestMetrics:
     brier: float = float("nan")
     log_loss: float = float("nan")
     accuracy: float = float("nan")
-    #: The same three for the market's implied probability — the benchmark that
+    #: Expected calibration error and its worst bin — "when it says 0.9, how
+    #: often is it right". Sized positions make this a money question, not a
+    #: cosmetic one: Kelly is convex in the probability.
+    ece: float = float("nan")
+    mce: float = float("nan")
+    #: The same for the market's implied probability — the benchmark that
     #: actually matters, on exactly the windows the model was asked about.
     market_brier: float = float("nan")
     market_log_loss: float = float("nan")
+    market_ece: float = float("nan")
+    #: Reliability diagram, kept whole so the report can render it.
+    reliability: CalibrationCurve | None = None
+
+    # Execution quality
+    fill_attempts: int = 0
+    fill_rate: float = 0.0
+    avg_holding_seconds: float = 0.0
+    #: Mean quoted spread on the windows we actually traded.
+    avg_quoted_spread: float = 0.0
+    #: Mean half-spread crossed per share, i.e. touch minus mid.
+    avg_spread_paid: float = 0.0
+    #: Mean adverse fill beyond the touch, per share.
+    avg_slippage: float = 0.0
 
     equity_curve: list[float] = field(default_factory=list)
     skips: dict[str, int] = field(default_factory=dict)
@@ -121,9 +142,19 @@ class BacktestMetrics:
             "brier": r(self.brier),
             "log_loss": r(self.log_loss),
             "accuracy": r(self.accuracy),
+            "ece": r(self.ece),
+            "mce": r(self.mce),
             "market_brier": r(self.market_brier),
             "market_log_loss": r(self.market_log_loss),
+            "market_ece": r(self.market_ece),
             "brier_skill": r(self.brier_skill),
+            "reliability": self.reliability.as_dict() if self.reliability else None,
+            "fill_attempts": self.fill_attempts,
+            "fill_rate": r(self.fill_rate),
+            "avg_holding_seconds": r(self.avg_holding_seconds, 2),
+            "avg_quoted_spread": r(self.avg_quoted_spread),
+            "avg_spread_paid": r(self.avg_spread_paid),
+            "avg_slippage": r(self.avg_slippage),
             "skips": self.skips,
         }
 
@@ -143,26 +174,22 @@ class BacktestMetrics:
         )
 
 
-def _brier(pairs: list[tuple[int, float]]) -> float:
+def _evaluate(pairs: list[tuple[int, float]]) -> EvaluationMetrics | None:
+    """Score (label, probability) pairs with Module 7's metric implementation.
+
+    Deliberately delegated rather than reimplemented: ``pmbtc.models.calibration``
+    already defines Brier, log loss, accuracy, ECE, MCE and the reliability
+    curve, and they are what the promotion gate uses. A second implementation
+    here would eventually disagree with it, and the disagreement would surface
+    as a model that passes one gate and fails the other for no visible reason.
+    """
     if not pairs:
-        return float("nan")
-    return sum((p - y) ** 2 for y, p in pairs) / len(pairs)
+        return None
+    import numpy as np
 
-
-def _log_loss(pairs: list[tuple[int, float]]) -> float:
-    if not pairs:
-        return float("nan")
-    total = 0.0
-    for y, p in pairs:
-        clipped = min(1.0 - 1e-15, max(1e-15, p))
-        total -= math.log(clipped) if y == 1 else math.log(1.0 - clipped)
-    return total / len(pairs)
-
-
-def _accuracy(pairs: list[tuple[int, float]]) -> float:
-    if not pairs:
-        return float("nan")
-    return sum(1 for y, p in pairs if (p >= 0.5) == (y == 1)) / len(pairs)
+    y = np.array([label for label, _ in pairs], dtype=float)
+    p = np.array([prob for _, prob in pairs], dtype=float)
+    return evaluate(y, p)
 
 
 def max_drawdown(equity: list[float]) -> float:
@@ -209,11 +236,19 @@ def compute_metrics(result: BacktestResult) -> BacktestMetrics:
     market_pairs = [
         (w.label, w.decision.market_prob_up) for w in windows if w.label is not None
     ]
-    metrics.brier = _brier(model_pairs)
-    metrics.log_loss = _log_loss(model_pairs)
-    metrics.accuracy = _accuracy(model_pairs)
-    metrics.market_brier = _brier(market_pairs)
-    metrics.market_log_loss = _log_loss(market_pairs)
+    model_eval = _evaluate(model_pairs)
+    market_eval = _evaluate(market_pairs)
+    if model_eval is not None:
+        metrics.brier = model_eval.brier
+        metrics.log_loss = model_eval.log_loss
+        metrics.accuracy = model_eval.accuracy
+        metrics.ece = model_eval.ece
+        metrics.mce = model_eval.mce
+        metrics.reliability = model_eval.curve
+    if market_eval is not None:
+        metrics.market_brier = market_eval.brier
+        metrics.market_log_loss = market_eval.log_loss
+        metrics.market_ece = market_eval.ece
 
     times = [w.settlement_time_ms for w in windows]
     span_ms = max(times) - min(times)
@@ -225,6 +260,11 @@ def compute_metrics(result: BacktestResult) -> BacktestMetrics:
     metrics.trade_rate = len(trades) / len(windows)
     if metrics.span_days > 0:
         metrics.trades_per_day = len(trades) / metrics.span_days
+    # Fill rate is measured against intents that actually reached the book, so
+    # a trade the risk engine refused is not counted as a fill failure.
+    metrics.fill_attempts = sum(1 for w in windows if w.fill_attempted)
+    if metrics.fill_attempts:
+        metrics.fill_rate = len(trades) / metrics.fill_attempts
     if not trades:
         metrics.equity_curve = [result.starting_bankroll_usdc]
         return metrics
@@ -241,6 +281,11 @@ def compute_metrics(result: BacktestResult) -> BacktestMetrics:
         metrics.avg_entry_price += fill.price
         metrics.avg_edge += window.decision.edge
         metrics.partial_fills += 1 if fill.partial else 0
+        metrics.avg_holding_seconds += window.holding_seconds
+        metrics.avg_quoted_spread += window.quoted_spread
+        # Per share: what crossing to the touch cost, and what was paid beyond it.
+        metrics.avg_spread_paid += max(0.0, window.touch_price - window.mid_price)
+        metrics.avg_slippage += max(0.0, fill.price - window.touch_price)
         if window.pnl_usdc > 0:
             metrics.wins += 1
             metrics.gross_profit_usdc += window.pnl_usdc
@@ -270,10 +315,16 @@ def compute_metrics(result: BacktestResult) -> BacktestMetrics:
         if metrics.gross_loss_usdc > _EPS
         else metrics.gross_profit_usdc
     )
-    metrics.wins = metrics.wins
     metrics.win_rate = metrics.wins / n
-    metrics.avg_entry_price /= n
-    metrics.avg_edge /= n
+    for attribute in (
+        "avg_entry_price",
+        "avg_edge",
+        "avg_holding_seconds",
+        "avg_quoted_spread",
+        "avg_spread_paid",
+        "avg_slippage",
+    ):
+        setattr(metrics, attribute, getattr(metrics, attribute) / n)
     # Break-even is the average price paid, not 0.5: a contract bought at 0.62
     # must win 62% of the time to return the stake.
     metrics.breakeven_win_rate = metrics.avg_entry_price
