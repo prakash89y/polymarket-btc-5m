@@ -75,7 +75,7 @@ def main() -> int:
         ("model registry validation", "test_training.py"),
         ("readiness validation", "check_readiness"),
         ("secret scan", "gitleaks"),
-        ("dependency scan", "pip-audit"),
+        ("dependency scan", "audit_dependencies.py"),
     ]:
         check(f"CI runs {label}", needle in text)
 

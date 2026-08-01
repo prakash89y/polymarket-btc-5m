@@ -176,8 +176,18 @@ jobs:
           pip install pip-audit
 
       - name: Dependency vulnerability scan
-        # Fails the build on a known CVE in anything we ship.
-        run: pip-audit --strict --desc
+        # Audits every installed third-party package, pinned, under --strict.
+        #
+        # Not plain `pip-audit`: the local project is installed editable and is
+        # not published to PyPI, so dependency collection fails on it and
+        # --strict makes that fatal. `--skip-editable` is not the answer either
+        # — skipping counts as a collection failure under --strict, and it would
+        # blanket-skip any editable install rather than just this one.
+        #
+        # So the audit set is built explicitly from pip's own view of installed
+        # non-editable distributions, and the script refuses to run if anything
+        # other than the local project is editable. Strictness is unchanged.
+        run: python scripts/audit_dependencies.py
 
   # ---------------------------------------------------------------------- #
   # A single required check for branch protection, so the rule does not need
