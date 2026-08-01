@@ -14,6 +14,31 @@ one that does not.
 
 ---
 
+## [0.8.1] — 2026-08-01 — Documentation site
+
+### Fixed
+- MkDocs strict mode rejected four links that escaped the `docs/` tree
+  (`index.md` → `../CHANGELOG.md`, `../CONTRIBUTING.md`, `../SECURITY.md`, and
+  `GITHUB_WORKFLOW.md` → `../.github/branch-protection.md`). Those links are
+  genuinely broken on the published site even though they resolve when browsing
+  GitHub, so **strict mode stays on** and the documentation architecture was
+  fixed instead: `scripts/generate_docs.py` now mirrors the root-level documents
+  into `docs/` and rewrites their internal links for the flattened layout. The
+  sources remain at the repository root, where GitHub and contributors expect
+  them; the copies carry a generated-from banner and CI fails if they drift.
+- Generated documentation was written with platform-native line endings, so the
+  same generator emitted different bytes on Windows than on a Linux CI runner
+  and the staleness check saw phantom drift. All generators now write explicit
+  LF.
+
+### Added
+- `generate_docs.py` asserts every relative link in `docs/` resolves inside
+  `docs/`, failing before MkDocs is reached.
+- `validate_github.py` checks strict mode is enabled, the mirrored pages exist
+  and are marked generated, and no documentation link escapes.
+
+---
+
 ## [0.8.0] — 2026-08-01 — Engineering Workflow
 
 **Schemas:** feature `ade558d616b58821` · dataset `4.0` · settlement `2.0` · model `1.1`
@@ -177,7 +202,8 @@ about making the previous seven reproducible and hard to regress.
   redaction, UTC window arithmetic, typed errors, Docker, test suite.
 - Live trading triple-gated and off by default.
 
-[Unreleased]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.5.0...v0.6.0
