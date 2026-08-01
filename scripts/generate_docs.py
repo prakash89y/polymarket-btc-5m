@@ -46,9 +46,12 @@ def generate_schema_docs() -> Path:
         "|---|---|---|",
         f"| Feature set | `{canonical_feature_schema_version()}` | "
         "a feature's formula, inputs, or units change (hashed automatically) |",
-        f"| Dataset features | `{FEATURE_SCHEMA_VERSION}` | the observation/snapshot shape changes |",
-        f"| Dataset records | `{DATASET_RECORD_VERSION}` | the market record shape changes |",
-        f"| Settlement parser | `{PARSER_VERSION}` | settlement detection or normalisation changes |",
+        f"| Dataset features | `{FEATURE_SCHEMA_VERSION}` | "
+        "the observation/snapshot shape changes |",
+        f"| Dataset records | `{DATASET_RECORD_VERSION}` | "
+        "the market record shape changes |",
+        f"| Settlement parser | `{PARSER_VERSION}` | "
+        "settlement detection or normalisation changes |",
         "",
         f"The feature set currently contains **{len(ENGINEERED_FEATURE_NAMES)} features**.",
         "",
