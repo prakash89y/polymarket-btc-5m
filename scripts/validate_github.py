@@ -128,7 +128,33 @@ def main() -> int:
           "Git LFS is deliberately not enabled"
           in (ROOT / "docs/GITHUB_WORKFLOW.md").read_text(encoding="utf-8"))
 
-    print("\n7. Versioning")
+    print("\n7. Documentation site")
+    mkdocs = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    check("mkdocs strict mode enabled", "strict: true" in mkdocs)
+
+    # Every root-level document referenced by the site must exist inside docs/,
+    # because strict mode refuses a link that escapes the docs tree.
+    for mirrored in ("CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md",
+                     "BRANCH_PROTECTION.md"):
+        path = ROOT / "docs" / mirrored
+        check(f"docs/{mirrored} mirrored", path.is_file())
+        if path.is_file():
+            check(f"docs/{mirrored} marked generated",
+                  path.read_text(encoding="utf-8").startswith("<!-- Generated from"))
+
+    link_pattern = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
+    escaping: list[str] = []
+    for doc in sorted((ROOT / "docs").rglob("*.md")):
+        for match in link_pattern.finditer(doc.read_text(encoding="utf-8")):
+            target = match.group(1).strip()
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            candidate, _, _ = target.partition("#")
+            if candidate and not (doc.parent / candidate).resolve().is_file():
+                escaping.append(f"{doc.name} -> {target}")
+    check("every internal docs link resolves", not escaping, "; ".join(escaping[:5]))
+
+    print("\n8. Versioning")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     versions = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.M)
     check("changelog has module releases", len(versions) >= 7, ", ".join(versions))

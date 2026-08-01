@@ -11,11 +11,111 @@ from __future__ import annotations
 import importlib
 import inspect
 import pkgutil
+import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
+
+#: Documents that live at the repository root because that is where GitHub and
+#: contributors expect them, but which also belong in the published site.
+#:
+#: MkDocs runs in strict mode and refuses links that escape `docs/` — correctly,
+#: because such a link is broken on the published site even though it resolves
+#: on GitHub. So rather than weakening the check, the sources are mirrored into
+#: `docs/` at generation time and their internal links are rewritten to match
+#: the flattened layout.
+#:
+#: Source of truth stays at the root. The copies are generated, and CI fails if
+#: they drift.
+MIRRORED_DOCUMENTS: dict[str, str] = {
+    "CHANGELOG.md": "CHANGELOG.md",
+    "CONTRIBUTING.md": "CONTRIBUTING.md",
+    "SECURITY.md": "SECURITY.md",
+    ".github/branch-protection.md": "BRANCH_PROTECTION.md",
+}
+
+#: Link rewrites applied to mirrored content. Each source path becomes the
+#: name it has inside `docs/`.
+_LINK_REWRITES: dict[str, str] = {
+    "docs/GITHUB_WORKFLOW.md": "GITHUB_WORKFLOW.md",
+    "docs/ARCHITECTURE.md": "ARCHITECTURE.md",
+    "docs/OPERATIONS.md": "OPERATIONS.md",
+    "docs/DEPLOYMENT.md": "DEPLOYMENT.md",
+    "docs/features.md": "features.md",
+    "../.github/branch-protection.md": "BRANCH_PROTECTION.md",
+    ".github/branch-protection.md": "BRANCH_PROTECTION.md",
+    "../CHANGELOG.md": "CHANGELOG.md",
+    "../CONTRIBUTING.md": "CONTRIBUTING.md",
+    "../SECURITY.md": "SECURITY.md",
+}
+
+_MARKDOWN_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
+
+
+def rewrite_links(text: str) -> str:
+    """Point markdown links at their location inside the flattened docs tree."""
+
+    def replace(match: re.Match[str]) -> str:
+        label, target = match.group(1), match.group(2)
+        # Split any anchor or title so only the path is rewritten.
+        path, _, suffix = target.partition("#")
+        rewritten = _LINK_REWRITES.get(path.strip())
+        if rewritten is None:
+            return match.group(0)
+        return f"[{label}]({rewritten}{'#' + suffix if suffix else ''})"
+
+    return _MARKDOWN_LINK.sub(replace, text)
+
+
+def mirror_root_documents() -> list[Path]:
+    """Copy root-level documents into `docs/`, rewriting their links.
+
+    A banner marks each copy as generated, so an editor who lands on it from the
+    site knows to change the source instead.
+    """
+    written: list[Path] = []
+    for source_name, target_name in MIRRORED_DOCUMENTS.items():
+        source = ROOT / source_name
+        if not source.is_file():
+            print(f"  WARNING: {source_name} missing; skipping mirror")
+            continue
+        banner = (
+            f"<!-- Generated from {source_name} by scripts/generate_docs.py. "
+            "Edit the source, not this copy. -->\n\n"
+        )
+        target = DOCS / target_name
+        target.write_text(banner + rewrite_links(source.read_text(encoding="utf-8")),
+                          encoding="utf-8")
+        written.append(target)
+    return written
+
+
+def check_internal_links() -> list[str]:
+    """Every relative markdown link in `docs/` must resolve inside `docs/`.
+
+    This is the invariant MkDocs enforces in strict mode, checked here too so a
+    broken link is caught by `generate_docs.py` rather than only by a CI job
+    that runs later.
+    """
+    problems: list[str] = []
+    for path in sorted(DOCS.rglob("*.md")):
+        for match in _MARKDOWN_LINK.finditer(path.read_text(encoding="utf-8")):
+            target = match.group(2).strip()
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            candidate, _, _ = target.partition("#")
+            if not candidate:
+                continue
+            resolved = (path.parent / candidate).resolve()
+            if not resolved.exists():
+                problems.append(f"{path.relative_to(ROOT)} -> {target}")
+            elif DOCS.resolve() not in resolved.parents and resolved != DOCS.resolve():
+                problems.append(
+                    f"{path.relative_to(ROOT)} -> {target} (escapes docs/)"
+                )
+    return problems
 
 
 def generate_feature_docs() -> Path:
@@ -167,9 +267,13 @@ def generate_index() -> Path:
         "",
         "## Project documents",
         "",
-        "- [Changelog](../CHANGELOG.md)",
-        "- [Contributing](../CONTRIBUTING.md)",
-        "- [Security policy](../SECURITY.md)",
+        "Mirrored from the repository root at build time, so every link on this",
+        "site resolves. Edit the source files, not these copies.",
+        "",
+        "- [Changelog](CHANGELOG.md)",
+        "- [Contributing](CONTRIBUTING.md)",
+        "- [Security policy](SECURITY.md)",
+        "- [Branch protection](BRANCH_PROTECTION.md)",
         "",
     ]
     path = DOCS / "index.md"
@@ -185,10 +289,19 @@ def main() -> int:
         generate_module_docs(),
         generate_api_docs(),
         generate_index(),
+        *mirror_root_documents(),
     ]
     for path in written:
         print(f"  wrote {path.relative_to(ROOT)} ({path.stat().st_size:,} bytes)")
     print(f"\n{len(written)} document(s) generated.")
+
+    problems = check_internal_links()
+    if problems:
+        print(f"\n{len(problems)} unresolved documentation link(s):")
+        for problem in problems:
+            print(f"  - {problem}")
+        return 1
+    print("All internal documentation links resolve inside docs/.")
     return 0
 
 

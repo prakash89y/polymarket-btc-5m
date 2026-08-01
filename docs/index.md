@@ -19,6 +19,10 @@ markets.
 
 ## Project documents
 
-- [Changelog](../CHANGELOG.md)
-- [Contributing](../CONTRIBUTING.md)
-- [Security policy](../SECURITY.md)
+Mirrored from the repository root at build time, so every link on this
+site resolves. Edit the source files, not these copies.
+
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Branch protection](BRANCH_PROTECTION.md)

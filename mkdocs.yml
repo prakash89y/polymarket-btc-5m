@@ -40,5 +40,15 @@ nav:
       - Schemas: SCHEMAS.md
       - Modules: MODULES.md
       - API: API.md
+  # Mirrored from the repository root by scripts/generate_docs.py. They live at
+  # the root because that is where GitHub and contributors expect them; copies
+  # live here so every link on the published site resolves under strict mode.
+  - Project:
+      - Changelog: CHANGELOG.md
+      - Contributing: CONTRIBUTING.md
+      - Security policy: SECURITY.md
+      - Branch protection: BRANCH_PROTECTION.md
 
+# Strict mode stays on. A link that escapes docs/ is broken on the published
+# site even though it resolves on GitHub, so the build should refuse it.
 strict: true

@@ -29,7 +29,8 @@ feature/     ●────●        ●──●
 **`main` and `develop` are protected.** No direct pushes, no force-pushes, no
 deletion. Every change arrives by pull request with green CI and one approving
 review. Configure this under *Settings → Branches* using the rules in
-[`.github/branch-protection.md`](../.github/branch-protection.md).
+[branch protection](BRANCH_PROTECTION.md), whose source lives at
+`.github/branch-protection.md`.
 
 **Feature branches are short-lived.** A branch open for two weeks is a merge
 conflict with extra steps. Split the work.

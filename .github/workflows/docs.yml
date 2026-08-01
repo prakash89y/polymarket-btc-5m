@@ -32,11 +32,16 @@ jobs:
           pip install -e ".[data,models]"
 
       - name: Generate documentation
+        # Also mirrors the root-level documents into docs/ and asserts that
+        # every relative link resolves inside the docs tree. Exits non-zero on
+        # a broken link, so this fails before mkdocs is even reached.
         run: python scripts/generate_docs.py
 
       - name: Fail if generated docs are stale
-        # Documentation is derived from the code. If regenerating changes
-        # anything, the committed copy no longer matches what the code says.
+        # Documentation is derived from the code, and the mirrored copies of
+        # CHANGELOG/CONTRIBUTING/SECURITY/branch-protection are derived from
+        # their sources. If regenerating changes anything, what is committed no
+        # longer matches what the repository actually says.
         run: |
           if ! git diff --quiet -- docs/; then
             echo "::error::Generated docs are out of date. Run scripts/generate_docs.py and commit."
@@ -46,6 +51,8 @@ jobs:
           echo "Generated documentation is current."
 
       - name: Build site
+        # Strict mode stays on: a link that escapes docs/ is broken on the
+        # published site even though it resolves when browsing GitHub.
         run: |
           pip install mkdocs mkdocs-material
           mkdocs build --strict
