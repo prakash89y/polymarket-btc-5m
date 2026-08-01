@@ -12,6 +12,38 @@ one that does not.
 
 ---
 
+## [0.8.2] — 2026-08-01 — Deterministic CI without collected data
+
+### Fixed
+- The release workflow failed on a clean runner because Module 6 validation
+  required a live CLOB archive, which exists only on a machine that has been
+  collecting. That conflated two distinct properties, so they are now split
+  rather than either being weakened:
+  - **Determinism is a property of the code.** Verifying it needs a fixed input
+    replayed twice, and a committed fixture is a *better* fixed input than a
+    live archive — byte-identical on every machine forever, where a live archive
+    differs by host and by hour.
+  - **A live archive proves an operational property**: that the collector is
+    running and emitting replayable output. Meaningful only where collection
+    happens.
+- `site/` (MkDocs build output) was committed by an earlier `git add -A` and is
+  now untracked and ignored. The blobs remain in history at v0.8.1.
+
+### Added
+- `tests/fixtures/ticks/clob_sample.jsonl.gz` — a real 42 KB slice of the CLOB
+  stream covering `book`, `price_change`, and `last_trade_price` for both
+  outcome tokens. Built by `scripts/make_tick_fixture.py` with `mtime=0` so
+  rebuilds are byte-stable.
+- `pmbtc.live.fixtures` resolves the archive source: the committed fixture under
+  `GITHUB_ACTIONS`/`CI` or when no live archive exists, the live archive
+  otherwise. The chosen source is always reported, never silently substituted.
+- `validate_module6.py --require-live` refuses the fixture entirely — the local
+  production check that the collector really is producing replayable output.
+- `tests/test_fixtures_resolution.py` covers resolution, fixture coverage of all
+  event types, and determinism against the committed bytes.
+
+---
+
 ## [0.8.1] — 2026-08-01 — Documentation site
 
 ### Fixed
@@ -200,7 +232,8 @@ about making the previous seven reproducible and hard to regress.
   redaction, UTC window arithmetic, typed errors, Docker, test suite.
 - Live trading triple-gated and off by default.
 
-[Unreleased]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/prakash89y/polymarket-btc-5m/compare/v0.6.0...v0.7.0

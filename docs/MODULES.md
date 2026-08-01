@@ -100,6 +100,7 @@ metadata, settlement information, and historical context only.
 | `book` | Level-2 order book state and microstructure metrics. |
 | `clob` | Polymarket CLOB market feed — the primary microstructure source. |
 | `feed` | Resilient WebSocket feed base class. |
+| `fixtures` | Archive source resolution: committed fixture versus live collection. |
 | `providers` | Live feature providers. |
 | `service` | Continuous collection service. |
 | `tape` | Trade tape: cumulative volume delta, flow, and realised volatility. |
