@@ -12,6 +12,88 @@ one that does not.
 
 ---
 
+## [0.12.0] — 2026-08-02 — Production data pipeline reliability
+
+No new functionality. Seven operational root causes, each proven by measurement
+before a line was changed, and each fixed at the cause rather than the symptom.
+
+Six competing explanations were **disproven** and deliberately not fixed:
+event-loop starvation (loop lag p99 **17.1 ms** under full production shape,
+`dropped=0`), receive starvation, archive I/O (0 reconnects in a 240 s probe
+with archiving on), network instability (18,158 frames / 0 reconnects
+standalone), the websocket library, and the feed implementation (raw library and
+our feed behave identically). No queue, thread or extra concurrency was added.
+
+### Fixed
+
+**1-2. The clock synchronised once and never again.** `ClockService.run_forever`
+existed from the first version of the module and was **never started by
+anything** — dead code behind `# pragma: no cover`. A 13.5-hour run logged
+exactly one `clock.synced` line, so `_last_sync_ms` never advanced and the
+status was `STALE` for all but the first five minutes. It is now supervised by
+`discovery_stack`, with every iteration guarded so one bad network minute cannot
+kill the loop.
+
+**3. A degraded sample became permanent.** That single startup sample
+self-reported `DRIFTED` *and* `UNCERTAIN` (offset 1,636 ms against
+`max_drift_ms` 1,500; uncertainty 927 ms against `max_uncertainty_ms` 750) and
+was applied for 13.5 hours. The measured true offset at the time was **297 ms**,
+so every timestamp the collector wrote was 1.34 s late. `add_sample` now refuses
+a sample that is *worse* than a still-usable incumbent — while never letting
+precision outrank freshness, since preferring an accurate memory over a fresh
+reading is what froze the offset in the first place.
+
+**4-5. Transport liveness was conflated with data freshness.** One budget drove
+both the reconnect trigger and the freshness gate. Across **1,353,586 archived
+CLOB frames not one inter-frame gap exceeded the 15-second budget** — the socket
+never stalls. What does happen is that **17% of BTC 5-minute markets are thin
+enough to say nothing for 15 seconds**, and a market outside its window says
+nothing at all. Silence tore down a healthy connection, `on_disconnect` then
+correctly discarded the book, and the book was destroyed and rebuilt on a loop.
+
+A quiet feed now stays connected. **No threshold moved and no gate weakened**:
+the budget is unchanged, the feed is still marked `STALE`, `is_fresh()` still
+refuses it and trading still fails closed. Only the response changed. Because
+data arrival no longer doubles as a liveness signal, CLOB keepalive pings are
+enabled and `ping_timeout` is bounded — an unanswered ping is now the only thing
+that can prove the transport is gone.
+
+**6. Subscriptions outlived their markets.** Sessions were closed at
+`settlement + cooldown`; all eleven horizons complete before settlement, so the
+cooldown held a subscription open on a market that had stopped existing. Now
+closed at settlement.
+
+**7. Alerts were unreachable from the process they describe.**
+`ops.alerts.evaluate`/`dispatch` were called from exactly one site —
+`cli.py`, inside the manual `pmbtc watch` command. A collector that died left a
+262-minute-stale heartbeat and nothing said a word. The **existing** engine is
+now driven from the service status tick (no second implementation of any
+condition), plus a heartbeat self-check for the one blind spot the heartbeat
+file cannot report: its own failure to be written.
+
+### Measured, before vs after
+
+| | before | after |
+|---|---|---|
+| `clock.synced` rate | 0.07/h (1 in 13.5 h) | **68/h** |
+| clock status | `stale` 1665, `drifted` 11, healthy **0** | **healthy 100%** |
+| distinct clock offsets | **1** (frozen) | 5 and moving |
+| `feed.stale` | 46.5/h | **0** |
+| `feed.error` | 13.9/h | **0** |
+| `feed.connected` | 66.2/h | 28.3/h |
+| CLOB observation latency | median 18,989 ms, p90 149,778 ms | **median 0 ms, p90 77 ms** |
+| snapshot quality (median) | 0.471 — below the 0.5 floor | **0.814** |
+| snapshots rejected | **85%** | **17%** |
+| `out_of_budget` + `stale` flags | 49% of observations | **0%** |
+| `ok` flags | 33% | **77%** |
+
+### Notes
+`tests/test_pipeline_reliability.py` pins each root cause, including an explicit
+assertion that the staleness budgets and quality floors are unchanged. Replay
+remains byte-identical and all module validators pass.
+
+---
+
 ## [0.11.0] — 2026-08-01 — Module 8.5: market edge validation
 
 The statistical review of Module 8 found a specific, reproducible pathology.

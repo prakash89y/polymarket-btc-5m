@@ -37,9 +37,20 @@ feed_frames = METRICS.counter("pmbtc_feed_frames_total", "WebSocket frames recei
 feed_reconnects = METRICS.counter("pmbtc_feed_reconnects_total", "Feed reconnections, by reason.")
 feed_state = METRICS.gauge("pmbtc_feed_connected", "1 when a feed is connected and fresh.")
 feed_staleness = METRICS.gauge("pmbtc_feed_staleness_ms", "Age of the newest frame, by feed.")
+feed_quiet = METRICS.counter(
+    "pmbtc_feed_quiet_periods_total",
+    "Times a feed data went past its freshness budget while the transport stayed up.",
+)
 
 
 class FeedState(StrEnum):
+    """**Data** state: is what this feed is telling us fit to trade on?
+
+    Deliberately not the same question as "is the socket up". A prediction
+    market with nothing happening produces a healthy socket and unusable data,
+    and conflating the two is what made a quiet market look like a dead venue.
+    """
+
     IDLE = "idle"
     CONNECTING = "connecting"
     LIVE = "live"
@@ -86,6 +97,12 @@ class FeedHealth:
     out_of_order: int = 0
     #: Total connected milliseconds, accumulated across sessions.
     connected_ms: int = 0
+    #: Is the *socket* up? Tracked separately from :attr:`state`, which
+    #: describes the data. A quiet market leaves this true and ``state`` stale.
+    transport_connected: bool = False
+    #: Times the data went past its freshness budget without the transport
+    #: failing. High and rising is a thin market, not a broken feed.
+    quiet_periods: int = 0
 
     #: Bounded latency sample; a full history would grow without limit on a
     #: feed delivering 150 frames per second.
@@ -168,6 +185,8 @@ class FeedHealth:
         return {
             "name": self.name,
             "state": self.state.value,
+            "transport_connected": self.transport_connected,
+            "quiet_periods": self.quiet_periods,
             "frames": self.frames,
             "reconnects": self.reconnects,
             "uptime_ms": self.uptime_ms(now),
@@ -201,6 +220,7 @@ class WebSocketFeed(ABC):
         backoff_base_s: float = 0.5,
         backoff_max_s: float = 30.0,
         ping_interval_s: float | None = 20.0,
+        ping_timeout_s: float | None = 20.0,
         now_fn: Callable[[], int] | None = None,
     ) -> None:
         self.name = name
@@ -214,6 +234,7 @@ class WebSocketFeed(ABC):
         self.backoff_base_s = backoff_base_s
         self.backoff_max_s = backoff_max_s
         self.ping_interval_s = ping_interval_s
+        self.ping_timeout_s = ping_timeout_s
         self.health = FeedHealth(name=name)
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
@@ -256,6 +277,7 @@ class WebSocketFeed(ABC):
                 await self._task
             self._task = None
         self.health.state = FeedState.STOPPED
+        self.health.transport_connected = False
         feed_state.set(0, feed=self.name)
 
     async def __aenter__(self) -> WebSocketFeed:
@@ -275,11 +297,17 @@ class WebSocketFeed(ABC):
                     self.url,
                     open_timeout=20,
                     ping_interval=self.ping_interval_s,
+                    # Bounded pong wait: with silence no longer triggering a
+                    # reconnect, an unanswered ping is the only thing that can
+                    # still prove the transport is gone. Leaving it unbounded
+                    # would let a dead socket sit "connected" indefinitely.
+                    ping_timeout=self.ping_timeout_s,
                     max_size=8 * 1024 * 1024,
                 ) as ws:
                     self._ws = ws
                     await self.subscribe(ws)
                     self.health.state = FeedState.LIVE
+                    self.health.transport_connected = True
                     self.health.connected_at_ms = self.now_fn()
                     if not self.health.started_at_ms:
                         self.health.started_at_ms = self.health.connected_at_ms
@@ -294,6 +322,7 @@ class WebSocketFeed(ABC):
                 log.warning("feed.error", feed=self.name, error=self.health.last_error)
 
             self._ws = None
+            self.health.transport_connected = False
             feed_state.set(0, feed=self.name)
             # Bank this session's connected time so uptime survives reconnects.
             if self.health.connected_at_ms:
@@ -314,22 +343,50 @@ class WebSocketFeed(ABC):
                 await asyncio.wait_for(self._stop.wait(), timeout=random.uniform(0, delay))
 
     async def _consume(self, ws: Any) -> None:
+        """Read frames until the *transport* fails.
+
+        Silence is not transport failure. Measured over 1,353,586 archived CLOB
+        frames, not one inter-frame gap exceeded the 15-second budget — the
+        socket never stalls. What does happen is that 17% of BTC 5-minute
+        markets are thin enough to say nothing for 15 seconds, and a market
+        outside its trading window says nothing at all. Treating that as a dead
+        venue tore the connection down, and :meth:`on_disconnect` then correctly
+        discarded the book, so the book was destroyed and rebuilt over and over.
+        That is what drove median CLOB observation latency from 81 ms to 27 s
+        and pushed 93% of snapshots below the quality floor.
+
+        The budget is unchanged and the freshness gate is unchanged: a quiet
+        feed is still marked ``STALE`` and :meth:`is_fresh` still refuses it, so
+        trading still fails closed. Only the *response* changes — the connection
+        is kept. Genuine transport failure (ping timeout, close frame, protocol
+        error) still raises out of ``ws.recv()`` to the caller, which remains
+        the sole trigger for a reconnect.
+        """
+        quiet = False
         while not self._stop.is_set():
             try:
                 raw = await asyncio.wait_for(
                     ws.recv(), timeout=self.staleness_budget_ms / 1000.0
                 )
             except TimeoutError:
-                # Silence is failure. The socket may be fine; the data is not.
+                # The data is unusable; the socket is not. Stay connected.
+                if not quiet:
+                    quiet = True
+                    self.health.quiet_periods += 1
+                    feed_quiet.inc(feed=self.name)
+                    log.info(
+                        "feed.quiet",
+                        feed=self.name,
+                        budget_ms=self.staleness_budget_ms,
+                        detail="data past its freshness budget; transport healthy",
+                    )
                 self.health.state = FeedState.STALE
-                self.health.last_error = (
-                    f"no frame for {self.staleness_budget_ms}ms; treating as dead"
-                )
-                log.warning(
-                    "feed.stale", feed=self.name, budget_ms=self.staleness_budget_ms
-                )
-                feed_reconnects.inc(feed=self.name, reason="stale")
-                return
+                continue
+
+            if quiet:
+                quiet = False
+                log.info("feed.resumed", feed=self.name)
+            self.health.state = FeedState.LIVE
 
             received = self.now_fn()
             self.health.frames += 1
