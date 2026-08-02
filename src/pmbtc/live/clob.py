@@ -85,9 +85,14 @@ class PolymarketMarketFeed(WebSocketFeed):
             name=f"clob:{slug or condition_id[:10]}",
             url=url,
             staleness_budget_ms=staleness_budget_ms,
-            # The venue pings; an extra client ping just adds noise on a socket
-            # already delivering >100 frames/second.
-            ping_interval_s=None,
+            # Client-side keepalive is what distinguishes "this market is
+            # quiet" from "this socket is dead". While staleness was the
+            # reconnect trigger, data arrival doubled as a liveness signal and
+            # an extra ping was pure noise on a socket delivering >100
+            # frames/second. Now that a quiet feed deliberately stays
+            # connected, a ping is the *only* remaining evidence the transport
+            # is alive, so it is no longer optional.
+            ping_interval_s=20.0,
             now_fn=now_fn,
         )
         self.condition_id = condition_id

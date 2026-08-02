@@ -129,7 +129,15 @@ class ClockService:
     # Sync
     # ------------------------------------------------------------------ #
     def add_sample(self, sample: ClockSample) -> None:
-        """Record a measurement. Kept separate from I/O so it is testable."""
+        """Record a measurement. Kept separate from I/O so it is testable.
+
+        A sample is refused when it is *worse* than the one it would replace and
+        the existing one is still usable. Without this the service adopted
+        whatever arrived last: in production a single startup sample with
+        927 ms of uncertainty — which the service itself scored ``DRIFTED`` and
+        ``UNCERTAIN`` — became the permanent correction, and the measured true
+        offset at the time was 297 ms against the 1,636 ms being applied.
+        """
         if sample.rtt_ms > self.cfg.max_sample_rtt_ms:
             log.debug(
                 "clock.sample_discarded",
@@ -138,11 +146,37 @@ class ClockService:
                 limit_ms=self.cfg.max_sample_rtt_ms,
             )
             return
+        previous = next((s for s in self._samples if s.source == sample.source), None)
+        if previous is not None and self._is_worse(sample, previous):
+            log.debug(
+                "clock.sample_rejected_worse",
+                source=sample.source,
+                rtt_ms=round(sample.rtt_ms, 1),
+                previous_rtt_ms=round(previous.rtt_ms, 1),
+            )
+            return
         # One sample per source: the freshest wins, so a slow source cannot
         # dominate the median with stale repeats.
         self._samples = [s for s in self._samples if s.source != sample.source]
         self._samples.append(sample)
         self._recompute()
+
+    def _is_worse(self, candidate: ClockSample, previous: ClockSample) -> bool:
+        """Is ``candidate`` less trustworthy than a still-usable ``previous``?
+
+        Only uncertainty is compared, because that is what decides whether the
+        service can act on the reading at all. A stale sample is never
+        preferred, however precise it was: once it ages past
+        ``stale_sync_seconds`` a fresh reading is worth more than an accurate
+        memory, which is exactly the case the frozen-offset failure hit.
+        """
+        age_s = (utc_now_ms() - previous.taken_at_ms) / 1000.0
+        if age_s > self.cfg.stale_sync_seconds:
+            return False
+        if previous.uncertainty_ms > self.cfg.max_uncertainty_ms:
+            # The incumbent is already unusable; anything fresh is an upgrade.
+            return False
+        return candidate.uncertainty_ms > previous.uncertainty_ms
 
     def _recompute(self) -> None:
         if not self._samples:
@@ -197,10 +231,27 @@ class ClockService:
         )
         return status
 
-    async def run_forever(self, fetchers: dict[str, Any]) -> None:  # pragma: no cover - loop
-        """Background resync task."""
+    async def run_forever(self, fetchers: dict[str, Any]) -> None:
+        """Background resync loop.
+
+        This existed from the first version of the module and was never started
+        by anything, which is the whole of root cause 1: a 13.5-hour collector
+        run logged exactly one ``clock.synced`` line, so ``_last_sync_ms`` never
+        advanced and the status was ``STALE`` for all but the first five
+        minutes. It is now supervised by
+        :func:`pmbtc.gamma.runtime.discovery_stack`.
+
+        Every iteration is guarded. A resync failure must never terminate the
+        loop, because a loop that dies on one bad network minute reproduces the
+        exact failure this fix exists to remove.
+        """
         while True:
-            await self.sync(fetchers)
+            try:
+                await self.sync(fetchers)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # pragma: no cover - defensive
+                log.warning("clock.resync_failed", error=f"{type(exc).__name__}: {exc}")
             await asyncio.sleep(self.cfg.sync_interval_seconds)
 
     # ------------------------------------------------------------------ #

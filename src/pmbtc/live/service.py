@@ -107,6 +107,8 @@ class CollectionService:
         self.reference_feed: BinanceMarketFeed | None = None
         self.sessions: dict[str, MarketSession] = {}
         self.stats = ServiceStats()
+        #: Last time the heartbeat file was written successfully.
+        self._last_heartbeat_ok_ms = 0
         self.collector = HistoricalCollector(
             config, client, clock, discovery, store, providers=[]
         )
@@ -222,8 +224,13 @@ class CollectionService:
         now = self.clock.now_ms()
         feeds_cfg = self.config.feeds
 
+        # Closed at settlement, not settlement + cooldown. All eleven horizons
+        # (T-300 .. T-1) are captured before the window closes, so the extra
+        # cooldown held a subscription open on a market that had stopped
+        # existing - guaranteed silence, and one more feed competing for the
+        # concurrency slot a genuinely active market needed.
         for session in list(self.sessions.values()):
-            if now > session.settlement_ms + feeds_cfg.cooldown_seconds * 1000:
+            if now >= session.settlement_ms:
                 await self._close_session(session)
 
         if not feeds_cfg.clob_enabled:
@@ -355,6 +362,8 @@ class CollectionService:
         now = self.clock.now_ms()
         feeds = [s.feed.snapshot_state(now) for s in self.sessions.values()]
         self._write_heartbeat(now)
+        self._check_heartbeat_self(now)
+        self._evaluate_alerts()
         log.info(
             "service.status",
             sessions=len(self.sessions),
@@ -368,6 +377,47 @@ class CollectionService:
             ),
             feeds=feeds,
         )
+
+    def _evaluate_alerts(self) -> None:
+        """Run the existing alert engine against our own heartbeat.
+
+        Root cause 7: ``ops.alerts.evaluate``/``dispatch`` were reachable only
+        from the manual ``pmbtc watch`` command, so a collector that died left a
+        262-minute-stale heartbeat and nothing said a word. The logic is reused
+        verbatim - this method only supplies the inputs and the schedule, and
+        adds no second implementation of any alert condition.
+
+        Alerting must never be able to stop collection, so every failure here is
+        swallowed with a warning.
+        """
+        from pmbtc.ops import (
+            AlertState,
+            alert_state_path,
+            build_summary,
+            dispatch,
+            evaluate,
+            read_heartbeat,
+        )
+
+        try:
+            state = AlertState(alert_state_path(self.config))
+            heartbeat = read_heartbeat(self.config)
+            summary = build_summary(self.config, self.store)
+            alerts = evaluate(
+                self.config, state, heartbeat=heartbeat, summary=summary
+            )
+            fired = dispatch(self.config, state, alerts)
+            if fired:
+                log.warning(
+                    "service.alerts_fired",
+                    count=len(fired),
+                    kinds=[a.kind.value for a in fired],
+                )
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning(
+                "service.alert_evaluation_failed",
+                error=f"{type(exc).__name__}: {exc}",
+            )
 
     def _write_heartbeat(self, now_ms: int) -> None:
         """Publish liveness. Detailed feed health goes here, not just a ping.
@@ -395,9 +445,31 @@ class CollectionService:
                     "feeds": feeds,
                 },
             )
+            self._last_heartbeat_ok_ms = now_ms
         except OSError as exc:
             # A heartbeat failure must never take down collection.
             log.warning("service.heartbeat_failed", error=str(exc))
+
+    def _check_heartbeat_self(self, now_ms: int) -> None:
+        """Notice when our own liveness signal stops being written.
+
+        The heartbeat is how everything else decides collection is alive, so a
+        silently failing write is the one blind spot the file itself cannot
+        report. If the last successful write is older than the alert engine's
+        own staleness rule, say so in the log the operator is already reading.
+        """
+        last = self._last_heartbeat_ok_ms
+        if not last:
+            return
+        stale_after = self.config.service.status_interval_seconds * 3 * 1000
+        age = now_ms - last
+        if age > stale_after:
+            log.error(
+                "service.heartbeat_stale",
+                age_ms=age,
+                limit_ms=stale_after,
+                detail="heartbeat writes are failing; external monitors are blind",
+            )
 
     def status(self) -> dict[str, Any]:
         now = self.clock.now_ms()

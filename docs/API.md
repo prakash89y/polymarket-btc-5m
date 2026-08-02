@@ -107,7 +107,7 @@ The public surface of each package, taken from `__all__`.
 - **`BookPair`** *(class)* — The two complementary outcome books of one market.
 - **`CollectionService`** *(class)* — Long-running dataset collection with live feeds.
 - **`FeedHealth`** *(class)* — Everything needed to decide whether to trust this feed right now.
-- **`FeedState`** *(class)* — Enum where members are also (and must be) strings
+- **`FeedState`** *(class)* — **Data** state: is what this feed is telling us fit to trade on?
 - **`Level`** *(class)* — Level(price: 'float', size: 'float')
 - **`LivePolymarketProvider`** *(class)* — Microstructure from the CLOB stream — the primary source.
 - **`LiveReferenceProvider`** *(class)* — BTC reference price and flow from the Binance stream.

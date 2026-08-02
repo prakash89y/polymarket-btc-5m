@@ -7,6 +7,8 @@ slightly different ones.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -98,8 +100,26 @@ async def discovery_stack(config: Config) -> AsyncIterator[DiscoveryStack]:
         liquidity=liquidity,
         schema=schema,
     )
+    # The resync loop is supervised for the lifetime of the stack. Without it
+    # the clock is synced once at startup and never again: a 13.5-hour
+    # production run logged one `clock.synced` line, leaving `_last_sync_ms`
+    # frozen and the status STALE for all but the first five minutes, with a
+    # 1,636 ms correction still being applied against a true offset of 297 ms.
+    resync: asyncio.Task[None] | None = None
     try:
         await stack.sync_clock()
+        resync = asyncio.create_task(
+            clock.run_forever(clock_fetchers(config, client)), name="clock:resync"
+        )
+        log.info(
+            "runtime.clock_resync_started",
+            interval_s=config.clock.sync_interval_seconds,
+            status=clock.status().value,
+        )
         yield stack
     finally:
+        if resync is not None:
+            resync.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await resync
         await client.aclose()
