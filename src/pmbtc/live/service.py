@@ -40,6 +40,7 @@ from pmbtc.live.binance import BinanceMarketFeed
 from pmbtc.live.clob import PolymarketMarketFeed
 from pmbtc.logging_setup import get_logger
 from pmbtc.metrics import METRICS
+from pmbtc.ops.supervisor import TOKEN_ENV as SUPERVISOR_TOKEN_ENV
 from pmbtc.utils.timeutils import isoformat
 
 log = get_logger("pmbtc.live.service")
@@ -443,6 +444,8 @@ class CollectionService:
                     "archived_frames": self.archive.frames_written,
                     "clock_status": self.clock.status().value,
                     "feeds": feeds,
+                    # Set by the supervisor; empty when started by hand.
+                    "supervisor_token": os.environ.get(SUPERVISOR_TOKEN_ENV, ""),
                 },
             )
             self._last_heartbeat_ok_ms = now_ms

@@ -243,3 +243,4 @@ evaluate / dispatch                the four alert conditions worth firing on
 | `gitinfo` | Git provenance for experiment tracking. |
 | `heartbeat` | Liveness heartbeat. |
 | `summary` | Daily dataset summary and readiness progress. |
+| `supervisor` | Collector supervision — the last operational blocker. |

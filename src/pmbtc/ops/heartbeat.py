@@ -33,6 +33,15 @@ class Heartbeat:
     archived_frames: int
     clock_status: str
     feeds: list[dict[str, Any]]
+    #: Identifies the supervisor *run* that owns this collector.
+    #:
+    #: A PID cannot do this job. The venv's ``python.exe`` is itself a
+    #: launcher that re-execs the base interpreter, so the PID a supervisor
+    #: holds is the shim's, while the heartbeat is written by its child.
+    #: A token passed through the environment survives any number of such
+    #: hops, and identifies the run rather than the process - so a stale
+    #: heartbeat from a previous supervisor is also rejected.
+    supervisor_token: str = ""
 
     def age_ms(self, now_ms: int | None = None) -> int:
         return (now_ms or utc_now_ms()) - self.written_at_ms
@@ -49,6 +58,7 @@ class Heartbeat:
             "archived_frames": self.archived_frames,
             "clock_status": self.clock_status,
             "feeds": self.feeds,
+            "supervisor_token": self.supervisor_token,
         }
         return payload
 
@@ -85,4 +95,5 @@ def read_heartbeat(config: Config) -> Heartbeat | None:
         archived_frames=int(data.get("archived_frames", 0)),
         clock_status=str(data.get("clock_status", "unknown")),
         feeds=list(data.get("feeds", [])),
+        supervisor_token=str(data.get("supervisor_token", "")),
     )

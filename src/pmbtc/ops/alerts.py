@@ -13,6 +13,10 @@ ignored too. So this module fires on exactly four conditions:
 4. **Data quality below threshold** — the share of low-quality snapshots has
    crossed the configured line.
 
+5. **Supervisor restart failing** — the collector will not stay up across
+   repeated restarts. Distinct from (1): collection stopped is the symptom, and
+   this says the automatic remedy has already been tried and is not working.
+
 Everything else is a log line. Alerts are deduplicated by key so a persistent
 condition notifies once and then goes quiet until it clears.
 """
@@ -46,6 +50,9 @@ class AlertKind(StrEnum):
     FEED_DEGRADED = "feed_degraded"
     READINESS_REGRESSED = "readiness_regressed"
     QUALITY_BELOW_THRESHOLD = "quality_below_threshold"
+    #: The supervisor cannot keep the collector up. Raised by
+    #: :mod:`pmbtc.ops.supervisor`, dispatched through this same engine.
+    SUPERVISOR_RESTART_FAILING = "supervisor_restart_failing"
 
 
 class Severity(StrEnum):

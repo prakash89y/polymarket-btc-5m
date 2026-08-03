@@ -243,11 +243,17 @@ The public surface of each package, taken from `__all__`.
 - **`Alert`** *(class)* — Alert(kind: 'AlertKind', severity: 'Severity', message: 'str', detail: 'dict[str, Any]', raised_at_ms: 'int')
 - **`AlertKind`** *(class)* — Enum where members are also (and must be) strings
 - **`AlertState`** *(class)* — Remembers what is already firing, so a standing problem alerts once.
+- **`CollectorSupervisor`** *(class)* — Keeps exactly one collector running, and says so when it cannot.
 - **`DailySummary`** *(class)* — DailySummary(generated_at_ms: 'int', stats: 'DatasetStats', readiness: 'ReadinessReport', markets_last_day: 'int' = 0, snapshots_last_day: 'int' = 0, labelled_last_day: 'int' = 0, feed_health: 'list[dict[str, Any]]' = <factory>)
-- **`Heartbeat`** *(class)* — Heartbeat(written_at_ms: 'int', pid: 'int', sessions: 'int', snapshots: 'int', labels: 'int', errors: 'int', archived_frames: 'int', clock_status: 'str', feeds: 'list[dict[str, Any]]')
+- **`HealthCheck`** *(class)* — HealthCheck(name: 'str', healthy: 'bool', detail: 'str')
+- **`HealthReport`** *(class)* — The five things the supervisor verifies on every tick.
+- **`Heartbeat`** *(class)* — Heartbeat(written_at_ms: 'int', pid: 'int', sessions: 'int', snapshots: 'int', labels: 'int', errors: 'int', archived_frames: 'int', clock_status: 'str', feeds: 'list[dict[str, Any]]', supervisor_token: 'str' = '')
+- **`InstanceLock`** *(class)* — Whole-machine mutual exclusion, released by the OS on process death.
 - **`Severity`** *(class)* — Enum where members are also (and must be) strings
 - **`alert_state_path`** *(function)* — 
 - **`build_summary`** *(function)* — 
+- **`check_health`** *(function)* — Verify process, instance, heartbeat, clock and feeds.
+- **`collector_command`** *(function)* — Launch the collector as a module, not through the console script.
 - **`dispatch`** *(function)* — Log and record new alerts. Returns the ones actually fired.
 - **`evaluate`** *(function)* — Return the alerts that should fire now.
 - **`heartbeat_path`** *(function)* — 
