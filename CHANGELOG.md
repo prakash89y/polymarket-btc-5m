@@ -12,6 +12,83 @@ one that does not.
 
 ---
 
+## [0.13.0] — 2026-08-03 — Collector supervision
+
+The last operational blocker. v0.12.0 fixed everything wrong *inside* the
+collector; this makes it survive the machine it runs on.
+
+The collector died twice, and neither time was a defect in it. Windows event
+``VSS 8193, hr=0x8007045b`` ("A system shutdown is in progress") was logged at
+14:01:35 UTC against a final collector line at 14:01:23 UTC, and the host booted
+again eighteen hours later with nothing to bring collection back. A process
+started by hand from a shell survives exactly as long as the machine does.
+
+### Added
+
+**`pmbtc supervise`** — keeps exactly one collector running. Restarts it on
+exit with bounded-exponential backoff, and restarts it when *hung*: a process
+that is running but no longer writing a heartbeat is the failure a PID check
+cannot see. Consecutive fast failures raise
+`AlertKind.SUPERVISOR_RESTART_FAILING` through the **existing**
+`ops.alerts` engine — no second implementation of any condition.
+
+**`pmbtc supervisor-status`** — reports the five supervised checks read-only.
+
+**Single-instance guarantee.** A named kernel mutex on Windows, `flock`
+elsewhere. Both are held by the process, so a supervisor killed with `-9`
+releases its claim immediately; a PID file would survive the death it describes
+and lock out every future start. Two collectors writing one append-only store is
+a data-integrity problem, not a performance one.
+
+**Scripts.** `install_supervisor.ps1`, `uninstall_supervisor.ps1`,
+`verify_supervisor.ps1`.
+
+### Two real bugs found during validation, both from launcher shims
+
+**The venv's `python.exe` is itself a launcher** that re-execs the base
+interpreter, so every logical process appears twice in the process table and the
+supervised PID is never the PID that writes the heartbeat — measured here: child
+`16132`, writer `18556`. Ownership is therefore established with a **run token**
+minted per supervisor start, passed through the environment and echoed back in
+the heartbeat. It survives any number of exec hops and is strictly stronger than
+a PID: it identifies the *run*, so a stale heartbeat from a previous supervisor
+is rejected too. (`collector_command()` already avoided the `pmbtc.exe` shim for
+this reason; the venv shim was the same trap one level down.)
+
+**`verify_supervisor.ps1` miscounted** for the same reason, reporting two
+supervisors and two collectors where there was one of each. It now counts leaf
+processes only. A second PowerShell defect was found alongside it: a
+single-element array is unrolled on return, so `.Count` was empty rather than
+`1`; call sites now force array context.
+
+A **startup grace period** was added after observing one spurious
+`supervisor.degraded` line 18 ms after each spawn — the new collector had not yet
+written its first heartbeat, so the file on disk still belonged to its
+predecessor. Alarming on a known-transient state is how an operator learns to
+ignore the log.
+
+### Validated end to end, against live processes
+
+| Check | Result |
+|---|---|
+| single supervisor | PASS — 1 (pid 7820) |
+| single collector | PASS — 1 (pid 11888) |
+| heartbeat owner | PASS — 10s old, token matched, clock healthy |
+| duplicate prevention | PASS — second supervisor exited 2, still 1 collector |
+| **kill recovery** | **PASS — collector restarted as pid 1392 (was 11888)** |
+| steady state | 0 `supervisor.degraded` lines after the grace fix |
+
+### Known limitation
+
+Task Scheduler refuses registration without elevation on this host — "Access is
+denied" from both `Register-ScheduledTask` and `schtasks.exe`, even for a
+logon-only task. The install script falls back to a **Startup-folder shortcut**,
+which needs no privilege and restores collection at sign-in. The window between
+boot and sign-in is uncovered; re-running the installer from an elevated
+PowerShell registers the at-boot trigger and closes it.
+
+---
+
 ## [0.12.0] — 2026-08-02 — Production data pipeline reliability
 
 No new functionality. Seven operational root causes, each proven by measurement

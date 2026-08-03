@@ -23,16 +23,30 @@ from pmbtc.ops.heartbeat import (
     write_heartbeat,
 )
 from pmbtc.ops.summary import DailySummary, build_summary, write_summary
+from pmbtc.ops.supervisor import (
+    CollectorSupervisor,
+    HealthCheck,
+    HealthReport,
+    InstanceLock,
+    check_health,
+    collector_command,
+)
 
 __all__ = [
     "Alert",
     "AlertKind",
     "AlertState",
+    "CollectorSupervisor",
     "DailySummary",
+    "HealthCheck",
+    "HealthReport",
     "Heartbeat",
+    "InstanceLock",
     "Severity",
     "alert_state_path",
     "build_summary",
+    "check_health",
+    "collector_command",
     "dispatch",
     "evaluate",
     "heartbeat_path",

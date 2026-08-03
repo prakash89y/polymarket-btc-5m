@@ -871,6 +871,65 @@ def backtest(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def supervise(
+    config: ConfigOption = None,
+    max_restarts: Annotated[
+        int | None,
+        typer.Option("--max-restarts", help="Stop after this many restarts (testing)."),
+    ] = None,
+) -> None:
+    """Keep exactly one collector running, restarting it when it stops.
+
+    This is what a Scheduled Task runs at boot. It holds a machine-wide lock, so
+    a second invocation exits rather than starting a duplicate collector against
+    the same append-only store.
+    """
+    from pmbtc.ops.supervisor import CollectorSupervisor
+
+    cfg = _load(config)
+    configure_logging(cfg)
+    cfg.ensure_directories()
+    supervisor = CollectorSupervisor(cfg, config_path=config)
+    raise typer.Exit(code=supervisor.run(max_restarts=max_restarts))
+
+
+@app.command("supervisor-status")
+def supervisor_status(config: ConfigOption = None) -> None:
+    """Report the five supervised health checks without changing anything.
+
+    Used by ``scripts/verify_supervisor.ps1`` and safe to run at any time.
+    """
+    from pmbtc.ops.supervisor import InstanceLock, check_health
+
+    cfg = _load(config)
+    configure_logging(cfg)
+    # If we can take the lock, nothing is supervising; if we cannot, something
+    # is. Released immediately either way so this never blocks a real start.
+    probe = InstanceLock(directory=cfg.resolved_path(cfg.app.data_dir))
+    supervised = not probe.acquire()
+    probe.release()
+
+    report = check_health(cfg, child=None, lock_held=supervised)
+    table = Table(title="collector supervision", show_lines=False)
+    table.add_column("check")
+    table.add_column("status")
+    table.add_column("detail")
+    for check in report.checks:
+        if check.name == "collector_process":
+            continue  # only the supervisor itself holds the child handle
+        mark = "[green]OK[/]" if check.healthy else "[red]FAIL[/]"
+        table.add_row(check.name, mark, check.detail)
+    table.add_row(
+        "supervisor",
+        "[green]OK[/]" if supervised else "[red]FAIL[/]",
+        "running" if supervised else "not running",
+    )
+    console.print(table)
+    if not supervised:
+        raise typer.Exit(code=1)
+
+
 @app.command("edge-scan")
 def edge_scan(
     config: ConfigOption = None,

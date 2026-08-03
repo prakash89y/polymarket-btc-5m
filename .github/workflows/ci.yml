@@ -158,6 +158,9 @@ jobs:
       - name: Production pipeline reliability regressions
         run: pytest -q tests/test_pipeline_reliability.py
 
+      - name: Collector supervision regressions
+        run: pytest -q tests/test_supervisor.py
+
       - name: A pathological disagreement cannot become a trade
         # The specific failure this module exists to prevent, measured on live
         # data: model 0.2391 against a book pricing UP at 0.9750, reported as
