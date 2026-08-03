@@ -14,6 +14,80 @@ one that does not.
 
 ---
 
+## [0.14.0] — 2026-08-03 — Module 9: paper trading
+
+Runs the production decision path against the live Polymarket book and records
+what would have happened, without ever sending an order. No wallet, no Polygon
+transaction, no credential, no new integration — the only difference from live
+trading is that the fill is computed rather than requested.
+
+### Added
+
+**`pmbtc paper`** — live paper trading. Discovers markets, opens CLOB feeds,
+evaluates each window at the decision horizon, and settles against Polymarket's
+own resolution.
+
+**`pmbtc paper-report`** — daily / weekly / cumulative record, execution
+quality, model-versus-market comparison, and the promotion gate. Exits non-zero
+when the gate refuses, which is the machine-readable form of "live may not arm".
+
+**`pmbtc.trading.pipeline`** — the decide → size → risk → fill sequence,
+extracted so backtest and paper share **one** implementation. Both call
+`evaluate_opportunity`; a divergence between them can now only come from the
+market, never from the code. Two tests assert this by inspecting the source of
+both engines.
+
+**Execution quality** — the measurement a backtest structurally cannot make. A
+backtest fills against a book reconstructed from its own archive, so its fill
+model is an assumption checked against itself. Here the tape keeps printing
+after the order is priced, and prints at or through our price are direct
+evidence the fill would have happened. `simulation_is_optimistic` is the verdict,
+and the promotion gate refuses to arm live trading when it is true.
+
+**`config.paper` is finally binding.** `min_trades_before_live`,
+`min_roi_before_live` and `required_significance` were declared in Module 1 and
+had no consumer until now.
+
+### Bug found by live validation, in Module 9's own code
+
+Paper fired on `seconds_left <= horizon`, so every decision landed a fraction of
+a second *inside* the horizon. That made
+`seconds_to_settlement < min_seconds_to_settlement` always true, applying the
+late-window edge bar of **0.12** where the backtest, evaluating at exactly T-30,
+applies **0.04** — paper was three times stricter than the backtest it exists to
+validate. Observed live as `edge -0.0100 < 0.1200 (late-window bar)`; after the
+fix the same market reported `edge -0.0100 < 0.0400`. Evaluation now fires in a
+narrow band at or just *above* the horizon. Two regression tests pin it.
+
+This is precisely the class of defect Module 9 was built to catch, and it was in
+Module 9.
+
+### Validated on live Polymarket BTC 5-minute markets
+
+Four windows evaluated across two runs, zero trades, all abstentions named:
+`edge_too_small` ×2, `insufficient_liquidity` ×2. Settlement resolution worked
+against Gamma with `closed=true`.
+
+Two findings worth recording. Real ask depth at T-30 measured **29 and 146
+USDC** against `min_book_depth_usdc: 200` — these markets are frequently too
+thin to trade at the configured size. And the books were quoted at **0.975,
+0.095 and 0.175**, consistent with Module 8.5's finding that the market is
+already highly confident by T-30.
+
+The default model is the market's own mid, which produces exactly zero edge and
+therefore no trades — deliberate, so an unconfigured run records abstentions
+rather than noise. The report confirms it: model and market Brier are identical
+(0.0102) and brier skill is exactly **+0.0000**, an end-to-end check that the
+pipeline is wired correctly.
+
+### Not changed
+No trading logic, feature engineering, model training, or readiness gate was
+weakened. `pmbtc paper` refuses to run when `mode: live`. A source-level test
+asserts the paper package contains no reference to private keys, signing, web3,
+or order submission.
+
+---
+
 ## [0.13.0] — 2026-08-03 — Collector supervision
 
 The last operational blocker. v0.12.0 fixed everything wrong *inside* the

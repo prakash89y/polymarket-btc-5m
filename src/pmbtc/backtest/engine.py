@@ -35,6 +35,7 @@ from pmbtc.constants import Outcome, SkipReason, TradeStatus
 from pmbtc.logging_setup import get_logger
 from pmbtc.trading.costs import CostModel, Fill, Quote
 from pmbtc.trading.decision import Decision, DecisionEngine
+from pmbtc.trading.pipeline import evaluate_opportunity
 from pmbtc.trading.risk import RiskLedger
 from pmbtc.trading.sizing import PositionSizer, Stake
 
@@ -365,47 +366,33 @@ class BacktestEngine:
                 fill_attempted=fill_attempted,
             )
 
-        decision = self.decisions.decide(
+        # The shared gauntlet: decide -> size -> risk -> fill. Paper trading
+        # (Module 9) runs this exact call, so a divergence between backtest and
+        # paper can only come from the market, never from the code.
+        outcome = evaluate_opportunity(
+            decisions=self.decisions,
+            sizer=self.sizer,
+            ledger=ledger,
+            fills=self.fills,
             model_prob_up=model(row),
             quote=quote,
             seconds_into_window=self.config.app.window_seconds - horizon,
             seconds_to_settlement=horizon,
+            now_ms=decision_ms,
             vol_zscore=_f(row, self.columns.vol_zscore),
             calibration_error=calibration_error,
         )
-        if not decision.trade or decision.outcome is None:
-            return result(decision, status=TradeStatus.REJECTED, skip=decision.skip_reason)
-
-        stake = self.sizer.size(
-            bankroll_usdc=ledger.state.bankroll_usdc,
-            model_prob=decision.confidence,
-            entry_price=decision.entry_price,
-            calibration_error=calibration_error,
-        )
-        if not stake.accepted:
-            return result(
-                decision, status=TradeStatus.REJECTED, skip=stake.skip_reason, stake=stake
-            )
-
-        verdict = ledger.check(now_ms=decision_ms, stake_usdc=stake.usdc)
-        if not verdict.allowed:
-            return result(
-                decision, status=TradeStatus.REJECTED, skip=verdict.reason, stake=stake
-            )
-
-        filled = self.fills.execute(
-            outcome=decision.outcome, quote=quote, stake_usdc=stake.usdc
-        )
-        if filled.fill is None:
+        decision, stake = outcome.decision, outcome.stake
+        if outcome.fill is None:
             return result(
                 decision,
                 status=TradeStatus.REJECTED,
-                skip=filled.skip_reason,
+                skip=outcome.skip_reason,
                 stake=stake,
-                fill_attempted=True,
+                fill_attempted=outcome.fill_attempted,
             )
 
-        fill = filled.fill
+        fill = outcome.fill
         ledger.register_open(cost_usdc=fill.cost_usdc)
         if settled is None:
             # Should not happen on a labelled dataset, but an unsettled market

@@ -179,6 +179,7 @@ decision in a backtest as it does at 3 a.m. against the live book.
 |---|---|
 | `costs` | The cost model. |
 | `decision` | The decision gate: probability in, position or a named refusal out. |
+| `pipeline` | The one path from an opportunity to an order. |
 | `risk` | Portfolio risk limits — the layer that survives a wrong model. |
 | `sizing` | Position sizing: fractional Kelly, with the caps that matter more than Kelly. |
 | `validation` | Market edge validation — Module 8.5. |
