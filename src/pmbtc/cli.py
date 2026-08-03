@@ -871,6 +871,96 @@ def backtest(
         raise typer.Exit(code=1)
 
 
+@app.command("paper-report")
+def paper_report(
+    config: ConfigOption = None,
+    json_out: Annotated[
+        bool, typer.Option("--json", help="Emit the report as JSON.")
+    ] = False,
+) -> None:
+    """Score the paper-trading record and apply the promotion gate.
+
+    Reads only the journal, so it is safe to run at any time, including while
+    paper trading is live. Exits non-zero when the gate refuses promotion,
+    which is the machine-readable form of "live mode may not arm".
+    """
+    from pmbtc.paper import build_report, open_journal
+
+    cfg = _load(config)
+    configure_logging(cfg)
+    journal = open_journal(cfg)
+    runs = journal.runs()
+    if not runs:
+        console.print("[yellow]No paper decisions recorded yet.[/]")
+        raise typer.Exit(code=1)
+
+    report = build_report(cfg, runs)
+    if json_out:
+        console.print_json(data=report.as_dict())
+    else:
+        console.print(report.render())
+
+    out = cfg.resolved_path(cfg.app.artifact_dir) / "reports" / "paper.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report.as_dict(), indent=2, default=str), encoding="utf-8")
+    if not json_out:
+        console.print(f"\nreport: {out}")
+    if not report.promotion_approved:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def paper(
+    config: ConfigOption = None,
+    minutes: Annotated[
+        float, typer.Option("--minutes", help="Run for this long; 0 runs until stopped.")
+    ] = 60.0,
+) -> None:
+    """Paper-trade live Polymarket BTC 5-minute markets. Places no orders.
+
+    Runs the production decision path — the same
+    ``evaluate_opportunity`` call the backtest makes — against the live CLOB
+    book, records every window traded or skipped, and settles against
+    Polymarket's own resolution.
+
+    No wallet, no signing, no Polygon transaction. The only difference from live
+    trading is that the fill is computed rather than requested.
+    """
+    import asyncio
+
+    from pmbtc.gamma.runtime import discovery_stack
+    from pmbtc.paper import LiveQuoteSource, PaperTradingEngine, open_journal
+    from pmbtc.paper.runner import PaperRunner
+
+    cfg = _load(config)
+    configure_logging(cfg)
+    cfg.ensure_directories()
+
+    if cfg.is_live:
+        console.print("[bold red]Refusing to paper-trade while mode is live.[/]")
+        raise typer.Exit(code=2)
+
+    async def _run() -> None:
+        async with discovery_stack(cfg) as stack:
+            quotes = LiveQuoteSource()
+            engine = PaperTradingEngine(
+                cfg, open_journal(cfg), quotes=quotes, clock=stack.clock
+            )
+            runner = PaperRunner(cfg, stack, engine, quotes)
+            console.print(
+                f"paper trading — bankroll {cfg.paper.initial_bankroll_usdc:.0f} USDC, "
+                f"decision horizon T-{engine.decision_horizon()}s, "
+                f"clock={stack.clock.status().value}"
+            )
+            stats = await runner.run(None if minutes <= 0 else minutes * 60.0)
+            console.print(
+                f"evaluated={stats.evaluated} traded={stats.traded} "
+                f"skipped={stats.skipped} settled={stats.settled}"
+            )
+
+    asyncio.run(_run())
+
+
 @app.command()
 def supervise(
     config: ConfigOption = None,

@@ -22,7 +22,7 @@ begins.
 | 7 | Model training (GBDT / sequence / ensemble + calibration) | **framework done, gated** |
 | 8 | Trading layer + backtesting framework | **done** |
 | 8.5 | Market edge validation (disagreement ceilings) | **done** |
-| 9 | Paper trading engine | pending |
+| 9 | Paper trading engine | **done** |
 | 10 | Live execution engine | pending |
 | 11 | Monitoring dashboard | pending |
 | 12 | Continuous retraining pipeline | pending |
