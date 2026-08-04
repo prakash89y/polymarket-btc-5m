@@ -93,21 +93,63 @@ class InstanceLock:
             return self._acquire_windows()
         return self._acquire_posix()
 
+    def lock_path(self) -> Path:
+        """Absolute path both platforms lock on — identical across sessions."""
+        directory = self.directory or Path(os.environ.get("TMPDIR", "/tmp"))
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory / f"{self.name}.lock"
+
     def _acquire_windows(self) -> bool:
+        """Exclusive open of a lock *file*: machine-wide, and needs no privilege.
+
+        The previous implementation used a ``Local\\`` named mutex. That
+        namespace is scoped to the Windows **logon session**, not the machine,
+        so two supervisors in different sessions each created their own mutex
+        and both believed they were the only instance.
+
+        That is not hypothetical. On 2026-08-03 a Scheduled Task running S4U in
+        session 0 and a Startup-folder shortcut in session 1 ran concurrently.
+        Each read the other's heartbeat, correctly judged its own child to be
+        hung on a foreign token, and killed it — a restart loop that reached 24
+        consecutive failures and wrote ~11 hours of snapshots from an 8-hour
+        stale Binance feed.
+
+        ``Global\\`` is machine-wide but can require SeCreateGlobalPrivilege,
+        which this deliberately unprivileged collector does not have. An
+        exclusive file handle gives the properties actually needed: keyed by an
+        absolute path so it is identical across sessions, no privilege
+        required, and released by Windows when the holder dies however it dies.
+        """
         import ctypes
         from ctypes import wintypes
 
-        ERROR_ALREADY_EXISTS = 183
+        GENERIC_WRITE = 0x40000000
+        NO_SHARING = 0  # the whole point: no other process may open this file
+        CREATE_ALWAYS = 2
+        FILE_ATTRIBUTE_NORMAL = 0x80
+        INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.CreateMutexW.argtypes = [wintypes.LPCVOID, wintypes.BOOL, wintypes.LPCWSTR]
-        kernel32.CreateMutexW.restype = wintypes.HANDLE
-        # "Global\\" would need elevation; the session namespace is the right
-        # scope for a per-user collector.
-        handle = kernel32.CreateMutexW(None, True, f"Local\\{self.name}")
-        if not handle:
-            return False
-        if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
-            kernel32.CloseHandle(handle)
+        kernel32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        kernel32.CreateFileW.restype = wintypes.HANDLE
+        handle = kernel32.CreateFileW(
+            str(self.lock_path()),
+            GENERIC_WRITE,
+            NO_SHARING,
+            None,
+            CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            None,
+        )
+        if not handle or handle == INVALID_HANDLE_VALUE:
             return False
         self._handle = handle
         return True
@@ -117,10 +159,7 @@ class InstanceLock:
         # type-checks both branches on whichever platform it is invoked from.
         import fcntl
 
-        directory = self.directory or Path(os.environ.get("TMPDIR", "/tmp"))
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{self.name}.lock"
-        handle = path.open("w")
+        handle = self.lock_path().open("w")
         try:
             exclusive_nonblocking = fcntl.LOCK_EX | fcntl.LOCK_NB  # type: ignore[attr-defined]
             fcntl.flock(handle.fileno(), exclusive_nonblocking)  # type: ignore[attr-defined]
