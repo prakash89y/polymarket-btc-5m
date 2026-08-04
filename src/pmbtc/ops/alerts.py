@@ -124,6 +124,19 @@ class AlertState:
         self.active.pop(key, None)
 
 
+#: The conditions :func:`evaluate` itself produces, and therefore the only ones
+#: it is entitled to retract. Any other key in the alert state belongs to a
+#: different producer (today: the supervisor) and must be left alone.
+EVALUATED_KINDS = frozenset(
+    {
+        AlertKind.COLLECTION_STOPPED.value,
+        AlertKind.FEED_DEGRADED.value,
+        AlertKind.READINESS_REGRESSED.value,
+        AlertKind.QUALITY_BELOW_THRESHOLD.value,
+    }
+)
+
+
 def evaluate(
     config: Config,
     state: AlertState,
@@ -229,8 +242,20 @@ def evaluate(
                 )
             )
 
+    # Clear only the conditions *this function* evaluates.
+    #
+    # It is not the sole producer any more: v0.13.0 added
+    # `pmbtc.ops.supervisor`, which raises SUPERVISOR_RESTART_FAILING through
+    # the same state file. Clearing every key not re-raised here silently
+    # erased that alert on the collector's next status tick — so on 2026-08-03
+    # a supervisor at 24 consecutive restart failures fired once and then
+    # vanished from `pmbtc watch`, leaving the operator with no standing signal
+    # while the restart loop continued. A producer may only retract its own
+    # conditions.
     fired_keys = {a.key for a in alerts}
     for key in list(state.active):
+        if key.split(":", 1)[0] not in EVALUATED_KINDS:
+            continue  # owned by another producer; not ours to retract
         if key not in fired_keys:
             # Condition cleared: forget it so a recurrence alerts again.
             state.clear(key)

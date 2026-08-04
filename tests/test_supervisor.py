@@ -130,6 +130,162 @@ class TestInstanceLock:
             holder.release()
 
 
+class TestMachineWideLock:
+    r"""Regression: the lock must exclude across Windows *sessions*, not just
+    within one.
+
+    Production, 2026-08-03: a Scheduled Task (S4U, session 0) and a
+    Startup-folder shortcut (session 1) each acquired their own ``Local\``
+    named mutex, because that namespace is per-logon-session. Two supervisors
+    ran, each killed the other's collector on a foreign heartbeat token, and the
+    restart loop reached 24 consecutive failures.
+    """
+
+    def test_the_lock_is_not_session_scoped(self) -> None:
+        r"""The specific defect: a ``Local\`` mutex is per-session."""
+        import inspect
+
+        from pmbtc.ops import supervisor
+
+        source = inspect.getsource(supervisor.InstanceLock)
+        # CreateMutexW is the unambiguous marker: every named-mutex namespace on
+        # Windows is session- or privilege-scoped. (The string "Local\\" also
+        # appears in the docstring explaining the old bug, so it cannot be the
+        # test's signal.)
+        assert "CreateMutexW" not in source, (
+            "named-mutex locking is session-scoped; the lock must key on a path"
+        )
+        assert "CreateFileW" in source, "expected the exclusive lock-file implementation"
+
+    def test_the_lock_is_keyed_by_an_absolute_path(self, tmp_path: Path) -> None:
+        """A path is identical across sessions; a session namespace is not."""
+        lock = InstanceLock(name="pmbtc-path", directory=tmp_path)
+        path = lock.lock_path()
+        assert path.is_absolute()
+        assert path.parent == tmp_path
+
+    def test_a_separate_process_cannot_acquire_the_same_lock(
+        self, tmp_path: Path
+    ) -> None:
+        """The real property, proven across a genuine process boundary.
+
+        A second OS process is the closest testable analogue of a second logon
+        session: it shares nothing with this one except the filesystem, which is
+        exactly what the lock must now key on.
+        """
+        import subprocess
+        import sys
+        import textwrap
+
+        held = InstanceLock(name="pmbtc-xproc", directory=tmp_path)
+        assert held.acquire()
+        try:
+            probe = textwrap.dedent(
+                f"""
+                from pathlib import Path
+                from pmbtc.ops.supervisor import InstanceLock
+                lock = InstanceLock(name="pmbtc-xproc", directory=Path(r"{tmp_path}"))
+                print("ACQUIRED" if lock.acquire() else "REFUSED")
+                """
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", probe], capture_output=True, text=True, timeout=60
+            )
+            assert "REFUSED" in result.stdout, (
+                f"a second process acquired the lock: {result.stdout!r} {result.stderr!r}"
+            )
+        finally:
+            held.release()
+
+    def test_the_lock_is_reacquirable_after_the_holder_releases(
+        self, tmp_path: Path
+    ) -> None:
+        first = InstanceLock(name="pmbtc-reacq", directory=tmp_path)
+        assert first.acquire()
+        first.release()
+        second = InstanceLock(name="pmbtc-reacq", directory=tmp_path)
+        assert second.acquire(), "a released lock must not block the next start"
+        second.release()
+
+
+class _StubSummary:
+    """Minimal stand-in for the daily summary `evaluate` reads.
+
+    Only two attributes are touched, and supplying them directly keeps this
+    test about alert ownership rather than about dataset construction.
+    """
+
+    class _Readiness:
+        checks: list = []
+
+    class _Stats:
+        quality_distribution: dict = {}
+
+    readiness = _Readiness()
+    stats = _Stats()
+
+
+class TestAlertOwnership:
+    """Regression: `evaluate` must not retract another producer's alert.
+
+    Production, 2026-08-03: the supervisor raised SUPERVISOR_RESTART_FAILING at
+    24 consecutive failures; the collector's next status tick called `evaluate`,
+    which cleared every active key it had not itself re-raised, erasing the
+    alert. `pmbtc watch` showed nothing while the restart loop continued.
+    """
+
+    def test_evaluate_does_not_own_the_supervisor_alert(self) -> None:
+        from pmbtc.ops.alerts import EVALUATED_KINDS
+
+        assert AlertKind.SUPERVISOR_RESTART_FAILING.value not in EVALUATED_KINDS
+
+    def test_evaluate_preserves_a_supervisor_alert(self, config: Config) -> None:
+        from pmbtc.ops.alerts import (
+            Alert,
+            AlertState,
+            Severity,
+            alert_state_path,
+            dispatch,
+            evaluate,
+        )
+        from pmbtc.utils.timeutils import utc_now_ms
+
+        state = AlertState(alert_state_path(config))
+        alert = Alert(
+            kind=AlertKind.SUPERVISOR_RESTART_FAILING,
+            severity=Severity.CRITICAL,
+            message="collector will not stay up",
+            detail={"check": "supervisor"},
+            raised_at_ms=utc_now_ms(),
+        )
+        assert dispatch(config, state, [alert]), "the supervisor alert did not fire"
+        key = alert.key
+        assert key in state.active
+
+        # A healthy collector tick: evaluate finds none of *its* conditions.
+        _write_heartbeat(config, pid=1, token="t")
+        reloaded = AlertState(alert_state_path(config))
+        evaluate(config, reloaded, heartbeat=None, summary=_StubSummary())
+        assert key in reloaded.active, "evaluate erased another producer's alert"
+
+    def test_evaluate_still_clears_its_own_conditions(self, config: Config) -> None:
+        """The dedup behaviour that made the bug subtle must be preserved."""
+        from pmbtc.ops.alerts import AlertState, alert_state_path, dispatch, evaluate
+
+        state = AlertState(alert_state_path(config))
+        # No heartbeat -> collection_stopped fires and is recorded.
+        raised = evaluate(config, state, heartbeat=None, summary=_StubSummary())
+        assert dispatch(config, state, raised)
+        assert any(k.startswith("collection_stopped") for k in state.active)
+
+        # Heartbeat healthy -> the condition clears and must be forgotten.
+        _write_heartbeat(config, pid=1, token="t")
+        from pmbtc.ops.heartbeat import read_heartbeat
+
+        evaluate(config, state, heartbeat=read_heartbeat(config), summary=_StubSummary())
+        assert not any(k.startswith("collection_stopped") for k in state.active)
+
+
 class TestHealthChecks:
     """Requirement 5: verify heartbeat, PID, instance, clock, feeds."""
 

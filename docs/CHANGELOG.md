@@ -14,6 +14,76 @@ one that does not.
 
 ---
 
+## [0.14.1] — 2026-08-04 — Duplicate-supervisor collision
+
+Two defects in v0.13.0's supervisor, both found by an RCA into an 11-hour data
+quality collapse. No trading logic, feature engineering, model training,
+threshold or readiness gate was touched.
+
+### The incident
+
+Snapshot quality fell from **0.3% below floor to 79.1%**; the readiness
+`quality` check regressed from 0.720 PASS to 0.622 FAIL. Cause: **two
+supervisors ran concurrently in different Windows logon sessions** — a
+Scheduled Task (S4U, session 0) and a Startup-folder shortcut (session 1). Each
+read the other's heartbeat, correctly judged its own child hung on a foreign
+token, and killed it. The restart loop reached **24 consecutive failures** while
+snapshots were written from an **8-hour-stale** Binance feed
+(`out_of_budget` 0.1% → 23.2%, `stale` 0.0% → 21.0%).
+
+Host-clock drift (+195 ms → +1,629 ms, past `max_drift_ms` 1500) and a Binance
+disconnect were ordinary events the system should have absorbed. The
+duplicate-supervisor loop is what turned them into 11 hours of unusable data.
+
+### Fixed
+
+**1. The single-instance lock was session-scoped, not machine-wide.**
+`InstanceLock` used a `Local\` named mutex; that namespace is per-logon-session,
+so two supervisors in different sessions each created their own and both
+believed they were alone. The code even said so — *"the session namespace is the
+right scope for a per-user collector"* — which is wrong once the supervisor can
+be launched from more than one session.
+
+Replaced with an **exclusive lock file** (`CreateFileW`, share mode 0). Keyed by
+an absolute path so it is identical across sessions, needs no privilege (unlike
+`Global\`, which can require SeCreateGlobalPrivilege and this collector runs
+deliberately unprivileged), and is released by Windows when the holder dies
+however it dies. POSIX keeps `flock`, now sharing the same `lock_path()`.
+
+**2. `evaluate()` retracted alerts it did not own.** It ended by clearing every
+active key it had not itself re-raised — correct when it was the only producer,
+wrong since v0.13.0 added the supervisor. SUPERVISOR_RESTART_FAILING fired
+**once**, then the collector's next status tick erased it, so `pmbtc watch`
+showed nothing while the restart loop continued. `evaluate` now clears only the
+four conditions it produces (`EVALUATED_KINDS`); a producer may retract only its
+own conditions.
+
+### Tests
+
+`TestMachineWideLock` — asserts `CreateMutexW` is gone, the lock is keyed by an
+absolute path, and **a genuinely separate OS process cannot acquire the same
+lock** (the closest testable analogue of a second logon session).
+`TestAlertOwnership` — asserts `evaluate` preserves a supervisor alert while
+still clearing its own conditions.
+
+### Measured
+
+| | during incident | after |
+|---|---|---|
+| Snapshots below quality floor | **79.1%** | **1.3%** |
+| `ok` flags | 22.3% | **77%** |
+| `out_of_budget` / `stale` | 23.2% / 21.0% | **0% / 0%** |
+| Clock | `drifted` 440/526 | **healthy 77/78** |
+| Append-only duplicates | — | **0 markets, 0 snapshots** |
+
+### Known limitation
+The two orphaned session-0 collectors from the incident could not be terminated
+from an unprivileged session (`Access is denied`). They are writing clean data
+and the append-only guard held (0 duplicates), but clearing them requires one
+elevated action — see the report accompanying this release.
+
+---
+
 ## [0.14.0] — 2026-08-03 — Module 9: paper trading
 
 Runs the production decision path against the live Polymarket book and records
